@@ -107,18 +107,10 @@ function paintPurchases() {
 }
 
 function purchaseForm() {
-  const baseLbl = (b) => { const m = (BASE_UNITS.find(x => x[0] === b)) || (PRODUCT_PRESENT.find(x => x[0] === b)); return m ? m[1] : (b || ''); };
   const buyOpts = (p) => {
-    // Producto con cadena jerárquica de unidades
-    if (Array.isArray(p.units) && p.units.length > 1) {
-      return chainFacts(p).map((f, i) => ({ key: 'u' + i, entry: f.name, factor: f.factor }));
-    }
-    const base = p.base || p.unit || 'UND';
-    const o = [{ key: 'base', entry: baseLbl(base), factor: 1 }];
-    (Array.isArray(p.pres) ? p.pres : []).forEach((pr, i) => {
-      if (pr.content > 0) o.push({ key: 's' + i, entry: pr.lbl, factor: pr.content });
-    });
-    return o;
+    if (!p) return [];
+    canonicalizeProduct(p);
+    return invSaleViews(p).map(v => ({ key: v.unidad, entry: v.unidad, factor: v.equiv, precio: v.precio }));
   };
   const html = `
     <div class="form-grid">
@@ -161,7 +153,7 @@ function purchaseForm() {
     const opts = optsOf();
     const s = $('#pfUnit');
     const prev = s.value;
-    s.innerHTML = opts.map((o, i) => `<option value="${i}">${o.entry}${o.key !== 'base' ? '  (1 = ' + o.factor + ' ' + baseLbl(curProd().base || '') + ')' : '  (base)'}</option>`).join('');
+    s.innerHTML = opts.map((o, i) => `<option value="${i}">${o.entry}${o.factor !== 1 ? '  (1 = ' + o.factor + ' ' + invBaseUnit(curProd()) + ')' : ''}</option>`).join('');
     let idx = 0;
     if (opts.length > 1) {
       let best = 0;
@@ -171,22 +163,22 @@ function purchaseForm() {
     if (prev !== '' && +prev < opts.length) idx = +prev;
     s.selectedIndex = idx;
     const p = curProd();
-    $('#pfCost').value = p ? (p.price * 0.7).toFixed(4) : 0;
+    $('#pfCost').value = p ? ((p.cost && p.cost > 0 ? p.cost : invUnitPrice(p) * 0.7) || 0).toFixed(4) : 0;
     hint();
   };
   const hint = () => {
     const o = selOpt();
     const q = num($('#pfQty').value);
     const p = curProd();
-    const base = p ? (Array.isArray(p.units) && p.units.length > 1 ? atomicUnit(p) : baseLbl(p.base || p.unit || 'UND')) : '';
+    const base = p ? invBaseUnit(p) : '';
     const es = (o ? q * o.factor : 0);
-    $('#pfHint').textContent = (p ? (p.name + ' · ') : '') + (o ? o.entry : '') + ' × ' + q + ' = ' + fmtNum(es) + ' ' + base + ' (atómico) al stock · costo/base $' + fmtNum($('#pfCost').value);
+    $('#pfHint').textContent = (p ? (p.name + ' · ') : '') + (o ? o.entry : '') + ' × ' + q + ' = ' + fmtNum(es) + ' ' + base + ' al stock (unidad canónica) · costo/unidad $' + fmtNum($('#pfCost').value);
   };
   const fmtNum = (v) => (Number(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
   const recalc = () => { const tot = state.items.reduce((s, i) => s + (i.baseQty * i.costBase), 0); $('#pfTotal').textContent = fmt.money(tot); };
   const repaint = () => {
     const tb = $('#pfBody');
-    const baseL = state.items.length ? baseLbl(state.items[0].base) : '';
+    const baseL = state.items.length ? (state.items[0].base || '') : '';
     if (state.items.length === 0) tb.innerHTML = `<tr><td colspan="8" class="empty">Sin productos</td></tr>`;
     else tb.innerHTML = state.items.map((i, idx) => `
       <tr>
@@ -194,7 +186,7 @@ function purchaseForm() {
         <td>${i.name}</td>
         <td class="num">${fmtNum(i.qty)}</td>
         <td>${i.entry}</td>
-        <td class="num">${fmtNum(i.baseQty)} ${baseLbl(i.base)}</td>
+        <td class="num">${fmtNum(i.baseQty)} ${i.base || ''}</td>
         <td class="num">${fmtNum(i.costBase)}</td>
         <td class="num">${fmt.money(i.baseQty * i.costBase)}</td>
         <td><button class="btn sm danger" data-rm="${idx}">${ico('close')}</button></td>
@@ -216,12 +208,12 @@ function purchaseForm() {
     if (!o) { toast('Unidad de entrada inválida', 'warn'); return; }
     state.items.push({
       pid: p.id, code: p.code, name: p.name,
-      base: Array.isArray(p.units) && p.units.length > 1 ? atomicUnit(p) : (p.base || p.unit || 'UND'),
+      base: invBaseUnit(p),
       entry: o.entry, factor: o.factor, qty: q, baseQty: q * o.factor, costBase: cb
     });
     repaint();
-    const bName = Array.isArray(p.units) && p.units.length > 1 ? atomicUnit(p) : baseLbl(p.base || p.unit || 'UND');
-    toast(`Añadido: ${fmtNum(q)} ${o.entry} → ${fmtNum(q * o.factor)} ${bName} (atómico)`, 'info');
+    const bName = invBaseUnit(p);
+    toast(`Añadido: ${fmtNum(q)} ${o.entry} → ${fmtNum(q * o.factor)} ${bName} (unidad canónica)`, 'info');
     $('#pfQty').value = 1;
     hint();
   });
