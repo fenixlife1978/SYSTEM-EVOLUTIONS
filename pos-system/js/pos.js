@@ -547,10 +547,15 @@ function finalizeSale(total, base, tax) {
     }))
   };
   db.sales.unshift(sale);
-  // Descontar stock (unidad base: qty × contenido de la presentación/peso)
+  // Descontar stock en la UNIDAD CANÓNICA (fuente única): it.content = equiv (unidades canónicas por presentación vendida)
   ticket.items.forEach(it => {
-    const p = db.products.find(x => x.id === it.id);
-    if (p) p.stock = Math.max(0, p.stock - (it.qty * (it.content || 1)));
+    const pr = db.products.find(x => x.id === it.id);
+    if (pr) {
+      canonicalizeProduct(pr);
+      const rest = Math.max(0, invStock(pr) - (it.qty * (it.content || 1)));
+      pr.stockBase = rest;
+      pr.stock = rest; // alias transitorio (mismo valor)
+    }
   });
   // Si es crédito, generar CxC y acumular la deuda del cliente
   if (isCredit) {
@@ -1205,93 +1210,103 @@ function addItemToTicket(p, qty, o) {
 
 /* Decide cómo vender el producto según su configuración de venta */
 function addProductToTicket(p) {
-  // 1) Si tiene presentaciones definidas (cada una con su unidad de descuento), se muestran
-  const presP = Array.isArray(p.pres) && p.pres.length ? p.pres : null;
-  if (presP) { posPickPresentation(p, presP); return; }
-  // 2) Producto con cadena jerárquica (p. ej. cigarrillos): ofrece cada unidad (Cartón/Cajetilla/Cigarrillo)
-  if (Array.isArray(p.units) && p.units.length > 1) {
-    const pres = chainFacts(p).map(f => ({ lbl: f.name, content: f.factor, price: (p.price || 0) * f.factor }));
-    posPickPresentation(p, pres);
-    return;
+  canonicalizeProduct(p);
+  const views = invSaleViews(p).filter(v => v.activa !== false);
+  if (!views.length) { toast('El producto no tiene presentaciones de venta activas', 'warn'); return; }
+  // Caso rápido (lector/buscador manual): una sola forma de venta que no es por peso → se agrega 1 inmediatamente
+  if (views.length === 1) {
+    const v = views[0];
+    if (!p.weighed) { addCanonicalLine(p, v, 1); toast('"' + p.name + '" · ' + v.unidad + ' agregado', 'success'); return; }
   }
-  if (p.weighed) { posWeightModal(p); return; }
-  addItemToTicket(p, 1);
-  toast('"' + p.name + '" agregado al ticket', 'success');
+  if (views.length === 1) { openQtyCanonical(p, views[0]); return; }
+  openPickCanonical(p, views);
 }
 
-/* Modal: seleccionar presentación/unidad de venta */
-function posPickPresentation(p, presList) {
-  const pres = presList || (Array.isArray(p.pres) && p.pres.length ? p.pres : []);
-  if (!pres.length) { addItemToTicket(p, 1); toast('"' + p.name + '" agregado al ticket', 'success'); return; }
-  const cards = pres.map((pr, i) => `
+/* Seleccionar la presentación/unidad de venta de un producto canónico */
+function openPickCanonical(p, views) {
+  const av = validateStock(p, invBasePres(p).contenido, 0); // sólo para mostrar disponibilidad
+  const cards = views.map((v, i) => `
       <div style="display:flex;align-items:center;gap:10px;border:1px solid #e2e6ec;border-radius:8px;padding:10px 12px;background:#fff">
         <div style="flex:1">
-          <b>${pr.lbl || ('Presentación ' + (i + 1))}</b>
-          <div style="color:#15803d;font-weight:800;font-family:Consolas,monospace">${fmt.money(pr.price || 0)}</div>
-          <div style="font-size:11px;color:#6b7280">${pr.u ? ('Descuenta del kardex: ' + pr.u + ((pr.qty && pr.qty !== 1) ? ' × ' + pr.qty : '')) : ((pr.content && pr.content !== 1) ? 'Equivale a ' + pr.content + ' ' + (p.base || 'und.') + ' (base)' : '')}</div>
+          <b>${v.unidad}</b>
+          <div style="color:#15803d;font-weight:800;font-family:Consolas,monospace">${fmt.money(v.precio)}</div>
+          <div style="font-size:11px;color:#6b7280">${v.equiv} ${invBaseUnit(p)} por unidad vendida${v.equiv === 1 ? ' · precio unitario' : ''}</div>
         </div>
-        <input type="number" id="presQty_${i}" value="1" min="1" step="1" style="width:70px;text-align:center" title="Cantidad" />
-        <button class="btn primary" data-pres="${i}">${ico('check')} Agregar</button>
+        <button class="btn primary" data-pick="${i}">${ico('check')} Vender</button>
       </div>`).join('');
   const html = `
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px">
+      <span style="color:#166534;font-weight:600">Disponible:</span>
+      <b style="color:#15803d">${invString(p)}</b>
+      <span style="color:#6b7280">(${fmtNumStock(invStock(p))} ${invBaseUnit(p)})</span>
+    </div>
     <p style="color:#374151;font-weight:600;margin:0 0 8px">Seleccione la presentación para esta venta</p>
-    <div style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto">${cards}</div>
-  `;
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto">${cards}</div>`;
   openModal({ title: 'Vender — ' + p.name, body: html, footer: `<button class="btn" onclick="closeModal()">Cancelar</button>` });
   setTimeout(() => {
-    $$('button[data-pres]').forEach(b => {
-      b.addEventListener('click', () => {
-        const i = +b.dataset.pres;
-        const pr = pres[i];
-        const qty = Math.max(1, parseInt($('#presQty_' + i).value) || 1);
-        const lbl = pr.lbl || ('Presentación ' + (i + 1));
-        addItemToTicket(p, qty, { name: p.name + ' · ' + lbl, price: pr.price || 0, weighed: p.weighed, lk: 'p' + p.id + '_s_' + i, unit: p.unit, present: lbl, base: p.base || p.unit, content: (pr.content != null && pr.content !== '' ? pr.content : 1) });
-        closeModal();
-        toast('"' + p.name + ' · ' + lbl + '" × ' + qty + ' agregado', 'success');
-      });
+    $$('button[data-pick]').forEach(b => b.addEventListener('click', () => { closeModal(); openQtyCanonical(p, views[+b.dataset.pick]); }));
+  }, 60);
+}
+
+function fmtNumStock(n) { const v = Number(n) || 0; return Number.isInteger(v) ? String(v) : parseFloat(v.toFixed(3)); }
+
+/* Pedir cantidad y agregar la presentación canónica elegida (permite decimales si es por peso) */
+function openQtyCanonical(p, view) {
+  const weighed = !!p.weighed;
+  const step = weighed ? '0.001' : '1';
+  const min = weighed ? 0 : 1;
+  const html = `
+    <div class="form-grid">
+      <div class="field span-2"><label>Producto</label><input value="${p.name}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Presentación</label><input value="${view.unidad} · ${fmt.money(view.precio)}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Cantidad</label><input type="number" step="${step}" min="${min}" id="qcQty" value="1" autofocus /></div>
+    </div>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:8px">
+      <div style="font-size:11px;color:#6b7280">Subtotal</div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b id="qcSub" style="font-size:22px;color:#15803d;font-family:Consolas,monospace">${fmt.money(view.precio)}</b>
+        <span id="qcConsume" style="font-size:11px;color:#6b7280"></span>
+      </div>
+    </div>`;
+  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
+                  <button class="btn primary" id="qcOk">${ico('check')} Agregar al ticket</button>`;
+  openModal({ title: 'Vender — ' + p.name, body: html, footer });
+  setTimeout(() => {
+    const inp = $('#qcQty'); inp.focus(); inp.select();
+    const calc = () => {
+      const q = parseFloat(inp.value) || 0;
+      const subtotal = q * (view.precio || 0);
+      const consume = q * (view.equiv || 1);
+      $('#qcSub').textContent = fmt.money(subtotal);
+      $('#qcConsume').textContent = 'Descuenta ' + fmtNumStock(consume) + ' ' + invBaseUnit(p);
+      return { q, consume };
+    };
+    inp.addEventListener('input', calc);
+    calc();
+    $('#qcOk').addEventListener('click', () => {
+      const { q, consume } = calc();
+      if (q <= 0) { toast('Indique una cantidad mayor que cero', 'warn'); return; }
+      const chk = validateStock(p, view.equiv || 1, q);
+      if (!chk.ok) { toast(chk.message, 'warn', 3200); return; }
+      addCanonicalLine(p, view, q);
+      closeModal();
+      const consTx = fmtNumStock(consume) + ' ' + invBaseUnit(p);
+      toast('"' + p.name + '" · ' + view.unidad + ' × ' + fmtNumStock(q) + ' agregado (' + consTx + ')', 'success');
     });
   }, 60);
 }
 
-/* Modal: venta por peso (kg + gramos) para productos a granel */
-function posWeightModal(p) {
-  const perKg = p.unit === 'GMS' || p.unit === 'G';
-  const kgLabel = perKg ? 'Cantidad en gramos' : 'Kilogramos';
-  const kgStep = perKg ? '1' : '0.001';
-  const html = `
-    <p style="color:#374151;font-weight:600;margin:0 0 8px">${perKg ? 'Peso en gramos' : 'Peso a granel'} · Precio de referencia: <b style="color:#15803d">${fmt.money(p.price)}</b>${perKg ? '/gramo' : '/kg'}</p>
-    <div class="form-grid">
-      ${perKg ? '' : `<div class="field"><label>Kilogramos (Kg)</label><input type="number" id="wKg" value="1" min="0" step="1" /></div>
-      <div class="field"><label>Gramos (g)</label><input type="number" id="wG" value="0" min="0" max="999" step="1" /></div>`}
-      ${perKg ? `<div class="field span-2"><label>${kgLabel}</label><input type="number" id="wKg" value="1000" min="0" step="1" /></div>` : ''}
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:8px">
-      <span style="color:#166534;font-weight:600">Subtotal venta</span>
-      <b id="wTotal" style="font-size:22px;color:#15803d;font-family:Consolas,monospace">${fmt.money(0)}</b>
-    </div>
-  `;
-  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
-                  <button class="btn primary" id="wOk">${ico('check')} Agregar al ticket</button>`;
-  openModal({ title: 'Vender por peso — ' + p.name, body: html, footer });
-  setTimeout(() => {
-    const calc = () => {
-      const k = parseFloat($('#wKg').value) || 0;
-      const g = perKg ? 0 : (parseFloat($('#wG').value) || 0);
-      const total = perKg ? k : (k + g / 1000);
-      const subtotal = total * (p.price || 0);
-      $('#wTotal').textContent = fmt.money(subtotal);
-      return { total, subtotal };
-    };
-    $('#wKg').addEventListener('input', () => calc());
-    const gEl = $('#wG'); if (gEl) gEl.addEventListener('input', () => calc());
-    calc();
-    $('#wOk').addEventListener('click', () => {
-      const { total } = calc();
-      if (total <= 0) { toast('Indique un peso mayor que cero', 'warn'); return; }
-      const lbl = perKg ? (total + ' g') : ((total % 1 === 0 ? total : total.toFixed(3)) + ' kg');
-      addItemToTicket(p, total, { name: p.name + ' · ' + lbl, price: p.price || 0, weighed: true, lk: 'p' + p.id + '_w', unit: p.unit, present: lbl, base: p.base || (perKg ? 'G' : 'KG'), content: 1 });
-      closeModal();
-      toast('"' + p.name + '" · ' + lbl + ' agregado: ' + fmt.money(total * (p.price || 0)), 'success');
-    });
-  }, 60);
+/* Agrega una presentación canónica como línea del ticket. content = equiv (unidad canónica). */
+function addCanonicalLine(p, view, qty) {
+  const baseUnit = invBaseUnit(p);
+  addItemToTicket(p, qty, {
+    name: p.name,
+    price: view.precio || 0,
+    weighed: !!p.weighed,
+    lk: 'p' + p.id + '_u_' + (view.unidad || 'und'),
+    unit: view.unidad,
+    present: view.unidad,
+    base: baseUnit,
+    content: view.equiv || 1
+  });
 }

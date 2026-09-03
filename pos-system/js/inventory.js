@@ -245,7 +245,7 @@ function canonicalizeProduct(p) {
   if (!p) return p;
   ensureUnitsCatalog();
   const has = p.invBasePres && p.invBaseUnit && typeof p.stockBase === 'number';
-  if (has) { if (p.stockMinimo == null) p.stockMinimo = 0; if (p.stockMaximo == null) p.stockMaximo = 0; return p; }
+  if (has) { if (p.stockMinimo == null) p.stockMinimo = 0; if (p.stockMaximo == null) p.stockMaximo = 0; return applyAlias(p); }
 
   const chain = (Array.isArray(p.units) && p.units.length) ? p.units : null;
   const canonUnit = chain ? String(chain[chain.length - 1].name) : canonUnitName(p.base || p.unit || 'UND');
@@ -298,6 +298,19 @@ function canonicalizeProduct(p) {
   if (p.stockMinimo == null) p.stockMinimo = 0;
   if (p.stockMaximo == null) p.stockMaximo = 0;
   p.weighed = !!p.weighed;
+  return applyAlias(p);
+}
+
+/* Alias transitorio de compatibilidad: p.stock refleja EXACTAMENTE stockBase
+   (un solo valor), y p.price es el precio por 1 unidad canónica (para vistas
+   que aún leen el modelo legado). No son stocks independientes: son la misma
+   cantidad. Se eliminará al migrar todos los consumidores a stockBase. */
+function applyAlias(p) {
+  const sb = invStock(p);
+  p.stock = sb;
+  // Precio por unidad canónica (equiv 1) si existe, si no se deriva de la base.
+  const u = invSaleViews(p).find(x => x.equiv === 1);
+  p.price = u ? u.precio : invBasePres(p).precio / Math.max(1, Number(invBasePres(p).contenido) || 1);
   return p;
 }
 

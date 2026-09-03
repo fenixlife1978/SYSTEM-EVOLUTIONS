@@ -232,7 +232,7 @@ function purchaseForm() {
     // Sumar stock por producto (en unidad base)
     const acc = {};
     state.items.forEach(i => { acc[i.pid] = (acc[i.pid] || 0) + i.baseQty; });
-    Object.keys(acc).forEach(pid => { const pr = db.products.find(x => x.id === +pid); if (pr) pr.stock = (pr.stock || 0) + acc[pid]; });
+    Object.keys(acc).forEach(pid => { const pr = db.products.find(x => x.id === +pid); if (pr) { canonicalizeProduct(pr); pr.stockBase = (invStock(pr) || 0) + acc[pid]; pr.stock = pr.stockBase; } });
     const total = state.items.reduce((s, i) => s + (i.baseQty * i.costBase), 0);
     const purchase = {
       id: db.purchases.length + 1,
@@ -481,7 +481,7 @@ const BASE_UNITS = [
   ['KG', 'Kilogramo'], ['G', 'Gramos'], ['LT', 'Litro'], ['ML', 'Mililitro'], ['GAL', 'Galón']
 ];
 
-function productForm(id) {
+function productFormLegacy(id) {
   const editing = typeof id === 'number' && !!db.products.find(x => x.id === id);
   const p = editing ? db.products.find(x => x.id === id)
     : { code: '', name: '', category: 'General', present: 'UND', unit: 'UND', base: 'UND', weighed: false, cost: 0, margin: 0, price: 0, stock: 0, taxed: true };
@@ -667,6 +667,144 @@ function productForm(id) {
       DB.save(db); closeModal(); renderDashboard('inventory'); toast('Producto guardado', 'success');
     });
     renderUnits();
+  }, 60);
+}
+
+/* ============================================================
+   PRODUCTO — formulario canónico (Fase 1)
+   Fuente única de inventario: stockBase en invBaseUnit.
+   ============================================================ */
+function productForm(id) {
+  const editing = typeof id === 'number' && !!db.products.find(x => x.id === id);
+  const source = editing ? db.products.find(x => x.id === id) : null;
+  const p = source ? canonicalizeProduct(JSON.parse(JSON.stringify(source))) : Object.assign(newProductShell(), { code: '', name: '', category: 'General', taxed: true });
+  ensureUnitsCatalog();
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const uOpt = (sel) => unitList().map(u => `<option value="${esc(u.name)}" ${u.name === sel ? 'selected' : ''}>${esc(u.name)} (${esc(u.symbol)})</option>`).join('');
+  const bp = invBasePres(p);
+  const canon = invBaseUnit(p);
+  const isWeighed = p.weighed === true;
+  const taxSel = p.taxed === false ? 'exento' : 'grabable';
+  const existing = (Array.isArray(p.invPres) && p.invPres.length) ? p.invPres.map((x, i) => ({ i, unidad: x.unidad, equiv: x.equiv, precio: x.precio, tipo: (x.tipo || 'MANUAL'), activa: x.activa !== false, base: !!x.base })) : [];
+  let rows = existing.length ? existing : [{ i: -1, unidad: canon, equiv: 1, precio: 0, tipo: 'MANUAL', activa: true, base: false }];
+
+  const html = `
+    <div class="form-grid">
+      <div class="field span-2"><label>Código de barras</label><input id="pcCode" value="${esc(p.code)}" placeholder="Leer con escáner o escribir código" autofocus /></div>
+      <div class="field span-2"><label>Nombre del producto</label><input id="pcName" value="${esc(p.name)}" /></div>
+      <div class="field span-2"><label>Categoría</label><input id="pcCat" value="${esc(p.category)}" placeholder="Ej. Bebidas, Lácteos…" /></div>
+      <div class="field"><label>Régimen IVA</label>
+        <select id="pcTax"><option value="grabable" ${taxSel === 'grabable' ? 'selected' : ''}>Incluye IVA (gravado)</option><option value="exento" ${taxSel === 'exento' ? 'selected' : ''}>Exento de IVA</option></select>
+      </div>
+      <div class="field" style="justify-content:flex-end"><label>&nbsp;</label>
+        <label style="font-weight:500;display:flex;align-items:center;gap:6px"><input type="checkbox" id="pcWeighed" ${isWeighed ? 'checked' : ''}/> Se vende por peso variable (balanza)</label>
+      </div>
+    </div>
+    <div style="background:#eef6ff;border:1px solid #bcd7f5;border-radius:8px;padding:8px 12px;font-size:12px;color:#1e40af;margin-bottom:12px">
+      Modelo de inventario: <b>un solo stock</b>, guardado en la <b>unidad canónica</b> indicada abajo. Todas las presentaciones de venta son conversiones de esa unidad.
+    </div>
+    <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px;margin-bottom:12px">
+      <b style="font-size:13px;color:#1f2937">Presentación base (maestra)</b>
+      <div class="form-grid" style="margin-top:10px">
+        <div class="field"><label>Unidad (el "todo")</label><select id="pcBaseUnit">${uOpt(bp.unidad || 'Unidad')}</select></div>
+        <div class="field"><label>Contenido</label><input type="number" step="0.001" min="0.001" id="pcBaseCont" value="${Number(bp.contenido) || 1}" /></div>
+        <div class="field"><label>Unidad canónica (la contenida)</label><select id="pcCanon">${uOpt(canon)}</select></div>
+        <div class="field"><label>Precio de la presentación base (USD)</label><input type="number" step="0.01" min="0" id="pcBasePrice" value="${Number(bp.precio) || 0}" /></div>
+      </div>
+      <div id="pcEquiv" style="font-size:12px;color:#0c8a4a;font-weight:600;margin-top:4px"></div>
+    </div>
+    <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px;margin-bottom:12px">
+      <b style="font-size:13px;color:#1f2937">Existencia</b>
+      <div class="form-grid" style="margin-top:10px">
+        <div class="field"><label>Stock (en unidad canónica)</label><input type="number" step="0.001" min="0" id="pcStock" value="${Number(p.stockBase) || 0}" /></div>
+        <div class="field"><label>Stock mínimo</label><input type="number" step="0.001" min="0" id="pcStockMin" value="${Number(p.stockMinimo) || 0}" /></div>
+        <div class="field"><label>Stock máximo</label><input type="number" step="0.001" min="0" id="pcStockMax" value="${Number(p.stockMaximo) || 0}" /></div>
+        <div class="field"><label>Costo unitario USD (referencia)</label><input type="number" step="0.0001" min="0" id="pcCost" value="${Number(p.cost) || 0}" /></div>
+      </div>
+    </div>
+    <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <b style="font-size:13px;color:#1f2937">Presentaciones / formas de venta</b>
+        <button type="button" class="btn sm primary" id="pcAdd">+ Agregar presentación</button>
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin-bottom:6px">Equivalencia = cuántas <b>unidades canónicas</b> representa una unidad vendida. Precio <b>Automático</b> = (precio base ÷ contenido) × equivalencia.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px">
+        <span>Unidad de venta</span><span>Equivalencia</span><span>Precio USD</span><span>Tipo de precio</span><span></span><span></span>
+      </div>
+      <div id="pcRows" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+  `;
+  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
+                  <button class="btn primary" id="pcSave">Guardar</button>`;
+  openModal({ title: editing ? 'Editar producto' : 'Nuevo producto', body: html, footer, size: 'modal-lg' });
+  setTimeout(() => {
+    const $pc = (s) => $('#pcRows').querySelector(s);
+    const pcBaseUnit = $('#pcBaseUnit'), pcBaseCont = $('#pcBaseCont'), pcCanon = $('#pcCanon'), pcBasePrice = $('#pcBasePrice');
+    const showEquiv = () => {
+      const c = parseFloat(pcBaseCont.value) || 1;
+      $('#pcEquiv').textContent = '1 ' + (pcBaseUnit.value || '?') + ' = ' + c + ' ' + (pcCanon.value || '?');
+    };
+    [pcBaseUnit, pcBaseCont, pcCanon].forEach(el => el.addEventListener('change', showEquiv)); pcBaseCont.addEventListener('input', showEquiv);
+    // auto price preview for a row given (canon, contenido)
+    const autoPrice = (equiv) => ( (parseFloat(pcBasePrice.value) || 0) / (parseFloat(pcBaseCont.value) || 1) ) * equiv;
+
+    const paintRows = () => {
+      const box = $('#pcRows'); if (!box) return; box.innerHTML = '';
+      rows.forEach((r, idx) => {
+        const div = document.createElement('div');
+        div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;align-items:center';
+        const auto = r.tipo === 'AUTO';
+        div.innerHTML = `
+          <select class="pr-un" data-i="${idx}">${uOpt(r.unidad || 'Unidad')}</select>
+          <input type="number" class="pr-eq" step="0.001" min="0.001" value="${Number(r.equiv) || 1}" data-i="${idx}" />
+          <input type="number" class="pr-pr" step="0.0001" min="0" value="${auto ? autoPrice(Number(r.equiv) || 1).toFixed(4) : (Number(r.precio) || 0)}" data-i="${idx}" ${auto ? 'readonly style="background:#f3f4f6"' : ''} />
+          <select class="pr-tp" data-i="${idx}"><option value="MANUAL" ${!auto ? 'selected' : ''}>Manual</option><option value="AUTO" ${auto ? 'selected' : ''}>Automático</option></select>
+          <label style="font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px"><input type="checkbox" class="pr-act" data-i="${idx}" ${r.activa ? 'checked' : ''}/> Activa</label>
+          <button type="button" class="btn sm danger pr-del" data-i="${idx}" title="Quitar">&times;</button>`;
+        box.appendChild(div);
+      });
+      box.querySelectorAll('.pr-un').forEach(el => el.addEventListener('change', () => { rows[+el.dataset.i].unidad = el.value; }));
+      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = parseFloat(el.value) || 1; if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = autoPrice(r.equiv).toFixed(4); } }));
+      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; if (r.tipo !== 'AUTO') r.precio = parseFloat(el.value) || 0; }));
+      box.querySelectorAll('.pr-tp').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; r.tipo = el.value; const rowDiv = el.closest('div'); const pIn = rowDiv.querySelector('.pr-pr'); const eq = r.equiv; if (r.tipo === 'AUTO') { pIn.readOnly = true; pIn.style.background = '#f3f4f6'; pIn.value = autoPrice(eq).toFixed(4); } else { pIn.readOnly = false; pIn.style.background = ''; pIn.value = r.precio || 0; } }));
+      box.querySelectorAll('.pr-act').forEach(el => el.addEventListener('change', () => { rows[+el.dataset.i].activa = el.checked; }));
+      box.querySelectorAll('.pr-del').forEach(el => el.addEventListener('click', () => { rows.splice(+el.dataset.i, 1); paintRows(); }));
+    };
+    $('#pcAdd').addEventListener('click', () => { rows.push({ unidad: pcCanon.value || 'Unidad', equiv: 1, precio: 0, tipo: 'MANUAL', activa: true }); paintRows(); });
+    paintRows();
+    showEquiv();
+
+    $('#pcSave').addEventListener('click', () => {
+      const code = $('#pcCode').value.trim();
+      const name = $('#pcName').value.trim();
+      if (!name) { toast('Ingrese el nombre del producto', 'warn'); return; }
+      const contenido = parseFloat(pcBaseCont.value) || 1;
+      const unidadBase = pcBaseUnit.value || pcCanon.value || 'Unidad';
+      const canonU = pcCanon.value || 'Unidad';
+      const basePrice = parseFloat(pcBasePrice.value) || 0;
+      const invPres = rows
+        .filter(r => r.unidad && r.unidad.trim())
+        .map(r => ({ unidad: r.unidad, equiv: parseFloat(r.equiv) || 1, precio: r.tipo === 'AUTO' ? autoPrice(r.equiv) : (parseFloat(r.precio) || 0), tipo: r.tipo, activa: r.activa !== false }))
+        .filter(r => r.equiv > 0);
+      const prod = {
+        id: editing ? source.id : (Date.now()),
+        code: code || ('P' + Date.now()),
+        name, category: $('#pcCat').value.trim() || 'General',
+        taxed: $('#pcTax').value === 'grabable',
+        weighed: $('#pcWeighed').checked,
+        invBasePres: { unidad: unidadBase, contenido, precio: basePrice },
+        invBaseUnit: canonU,
+        invPres,
+        stockBase: parseFloat($('#pcStock').value) || 0,
+        stockMinimo: parseFloat($('#pcStockMin').value) || 0,
+        stockMaximo: parseFloat($('#pcStockMax').value) || 0,
+        cost: parseFloat($('#pcCost').value) || 0,
+        margin: 0
+      };
+      canonicalizeProduct(prod);
+      if (editing) Object.assign(source, prod); else db.products.push(prod);
+      DB.save(db); closeModal(); renderDashboard('inventory'); toast('Producto guardado', 'success');
+    });
   }, 60);
 }
 
