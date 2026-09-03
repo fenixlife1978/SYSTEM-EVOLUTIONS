@@ -1709,6 +1709,7 @@ function renderSettings() {
       <div class="tab" data-tab="tax">Impuestos</div>
       <div class="tab" data-tab="invoice">Facturación</div>
       <div class="tab" data-tab="pos">Punto de Venta</div>
+      <div class="tab" data-tab="units">Unidades</div>
       <div class="tab" data-tab="data">Datos</div>
     </div>
     <div id="settingsContent"></div>
@@ -1794,6 +1795,67 @@ function renderSettings() {
       </div>
     `;
     // Binds
+    if (tab === 'units') {
+      ensureUnitsCatalog();
+      const escU = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const typesOpt = (sel) => INV_TYPES.map(t => `<option value="${t.k}" ${sel === t.k ? 'selected' : ''}>${t.lbl}</option>`).join('');
+      const grid = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr 56px 70px;gap:6px;align-items:center';
+      let rows = db.units.map(u => ({ id: u.id, name: u.name, symbol: u.symbol, type: u.type }));
+      const removed = [];
+      c.innerHTML = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h3 class="card-title" style="margin:0">Unidades de inventario</h3>
+            <button class="btn sm primary" id="unAdd">+ Nueva unidad</button>
+          </div>
+          <p style="color:#6b7280;font-size:12px;margin:0 0 12px">Las presentaciones (Base y de venta) usan unidades de este catálogo. La columna "En uso" indica si un producto la referencia; esas no pueden eliminarse.</p>
+          <div style="${grid};font-size:11px;color:#6b7280;font-weight:600;padding:0 2px 6px">
+            <span>Nombre</span><span>Símbolo</span><span>Tipo</span><span>En uso</span><span></span><span>ID</span>
+          </div>
+          <div id="unRows"></div>
+          <div style="margin-top:12px"><button class="btn primary" id="unSave">Guardar cambios</button></div>
+        </div>`;
+      const paintRows = () => {
+        const box = $('#unRows'); if (!box) return;
+        box.innerHTML = '';
+        rows.forEach((u, i) => {
+          const r = document.createElement('div');
+          r.style.cssText = grid + ';margin-bottom:4px';
+          const inUse = unitInUse(u.name);
+          r.innerHTML = `
+            <input class="un-name" value="${escU(u.name)}" data-i="${i}" placeholder="Nombre de la unidad" />
+            <input class="un-sym" value="${escU(u.symbol)}" data-i="${i}" />
+            <select class="un-type" data-i="${i}">${typesOpt(u.type)}</select>
+            <span style="font-size:11px;color:${inUse ? '#15803d' : '#9ca3af'}">${inUse ? 'Si' : 'No'}</span>
+            <button type="button" class="btn sm danger un-del" data-i="${i}" title="Eliminar">&times;</button>
+            <span style="font-size:11px;color:#9ca3af">${u.id == null ? 'nuevo' : '#' + u.id}</span>`;
+          box.appendChild(r);
+        });
+        box.querySelectorAll('.un-name').forEach(inp => inp.addEventListener('input', () => rows[+inp.dataset.i].name = inp.value));
+        box.querySelectorAll('.un-sym').forEach(inp => inp.addEventListener('input', () => rows[+inp.dataset.i].symbol = inp.value));
+        box.querySelectorAll('.un-type').forEach(sel => sel.addEventListener('change', () => rows[+sel.dataset.i].type = sel.value));
+        box.querySelectorAll('.un-del').forEach(btn => btn.addEventListener('click', () => {
+          const u = rows[+btn.dataset.i];
+          if (u.id != null) removed.push(u.id);
+          rows.splice(+btn.dataset.i, 1);
+          paintRows();
+        }));
+      };
+      $('#unAdd').addEventListener('click', () => { rows.push({ id: null, name: '', symbol: '', type: 'unit' }); paintRows(); });
+      $('#unSave').addEventListener('click', () => {
+        try {
+          removed.forEach(id => unitRemove(id));
+          removed.length = 0;
+          rows.forEach(u => {
+            if (!u.name.trim()) throw new Error('El nombre de cada unidad es obligatorio');
+            if (u.id == null) unitCreate({ name: u.name, symbol: u.symbol, type: u.type });
+            else unitUpdate(u.id, { name: u.name, symbol: u.symbol, type: u.type });
+          });
+          toast('Unidades guardadas', 'success');
+        } catch (e) { toast(e.message || 'Error al guardar unidades', 'error'); }
+      });
+      paintRows();
+    }
     if (tab === 'company') $('#saveCo')?.addEventListener('click', () => {
       s.company.name = $('#coName').value; s.company.rif = $('#coRif').value;
       s.company.phone = $('#coPh').value; s.company.address = $('#coAddr').value;
