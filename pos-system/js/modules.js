@@ -277,10 +277,11 @@ function purchaseForm() {
    INVENTARIO
    ============================================================ */
 function renderInventory() {
-  const totalProducts = db.products.length;
-  const totalStock = db.products.reduce((s, p) => s + p.stock, 0);
-  const totalValue = db.products.reduce((s, p) => s + p.stock * p.price, 0);
-  const lowStock = db.products.filter(p => p.stock < 30).length;
+  const list = db.products.map(p => { canonicalizeProduct(p); return p; });
+  const totalProducts = list.length;
+  const totalStock = list.reduce((s, p) => s + invStock(p), 0);
+  const totalValue = list.reduce((s, p) => s + invStock(p) * invUnitPrice(p), 0);
+  const lowStock = list.filter(p => invStock(p) < Math.max(1, Number(p.stockMinimo) || 0)).length;
   const cats = [...new Set(db.products.map(p => p.category))];
   const html = `
     <div class="module-head">
@@ -326,9 +327,10 @@ function renderInventory() {
   $('#newProduct').addEventListener('click', () => productForm());
   $('#invKardex').addEventListener('click', inventoryKardex);
   $('#exportInv').addEventListener('click', () => {
-    const csv = 'Codigo,Descripcion,Categoria,Unidad,Stock,Precio\n' +
-      db.products.map(p => `${p.code},"${p.name}",${p.category},${p.unit},${p.stock},${p.price}`).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const esc = (s) => String(s == null ? '' : s).replace(/"/g, '""');
+    const csv = 'Codigo,Descripcion,Categoria,UnidadCanonica,StockCanonico,StockDescompuesto,PrecioUnidad,Valor\n' +
+      list.map(p => `${p.code},"${esc(p.name)}",${p.category},${invBaseUnit(p)},${invStock(p)},"${esc(invString(p))}",${invUnitPrice(p)},${invStock(p) * invUnitPrice(p)}`).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = 'inventario.csv'; a.click();
     toast('Inventario exportado', 'success');
@@ -351,10 +353,10 @@ function paintInventory() {
       <td><code>${p.code}</code></td>
       <td>${p.name}</td>
       <td>${p.category}</td>
-      <td>${p.present || PRESENT_LBL(p.unit)}${p.weighed ? ' (peso)' : ''}</td>
-      <td class="num">${p.stock}</td>
-      <td class="num">${fmt.money(p.price)}</td>
-      <td class="num">${fmt.money(p.stock * p.price)}</td>
+      <td>${invBaseUnit(p)}${p.weighed ? ' (peso)' : ''}</td>
+      <td class="num" title="${fmtNumK(invStock(p))} ${invBaseUnit(p)}">${invBreakdown(p, invStock(p))}</td>
+      <td class="num">${fmt.money(invUnitPrice(p))}</td>
+      <td class="num">${fmt.money(invStock(p) * invUnitPrice(p))}</td>
       <td class="actions-cell">
         <button class="btn sm" data-edit="${p.id}">Editar</button>
         <button class="btn sm danger" data-del="${p.id}">${ico('close')}</button>
@@ -390,7 +392,7 @@ function inventoryKardex() {
       $('#kxResults').innerHTML = list.length === 0
         ? '<div class="dt empty">Sin resultados</div>'
         : `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Producto</th><th>Cat.</th><th class="num">Stock</th><th></th></tr></thead><tbody>
-             ${list.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td class="num">${fmtNumK(p.stock)}</td><td><button class="btn sm primary" data-kx="${p.id}">Ver Kardex</button></td></tr>`).join('')}
+             ${list.map(p => { canonicalizeProduct(p); return `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td class="num">${invBreakdown(p, invStock(p))}</td><td><button class="btn sm primary" data-kx="${p.id}">Ver Kardex</button></td></tr>`; }).join('')}
            </tbody></table>`;
       $$('#kxResults button[data-kx]').forEach(b => b.addEventListener('click', () => { closeModal(); showKardex(+b.dataset.kx); }));
     };
@@ -403,16 +405,16 @@ function inventoryKardex() {
 function showKardex(pid) {
   const p = db.products.find(x => x.id === pid);
   if (!p) { toast('Producto no encontrado', 'error'); return; }
-  const base = p.base || p.unit || 'UND';
-  const baseL = (b) => { const m = (BASE_UNITS.find(x => x[0] === b)) || (PRODUCT_PRESENT.find(x => x[0] === b)); return m ? m[1] : (b || ''); };
+  canonicalizeProduct(p);
+  const canonU = invBaseUnit(p);
   const mov = [];
-  // Entradas por compra
+  // Entradas por compra (baseQty ya en unidad canónica)
   db.purchases.forEach(pu => {
     (Array.isArray(pu.detail) ? pu.detail : []).forEach(d => {
       if (d.code === p.code && d.baseQty > 0) mov.push({ date: pu.date, ref: 'Compra ' + (pu.invoice || pu.date), kind: 'E', qty: d.baseQty });
     });
   });
-  // Salidas por venta
+  // Salidas por venta (baseUnits ya en unidad canónica)
   db.sales.forEach(s => {
     (Array.isArray(s.lines) ? s.lines : []).forEach(l => {
       if (l.pid === p.id && (l.baseUnits || 0) > 0) mov.push({ date: s.date, ref: 'Venta ' + s.number + (s.status === 'refunded' ? ' (reemb.)' : ''), kind: 'S', qty: l.baseUnits });
@@ -420,39 +422,37 @@ function showKardex(pid) {
   });
   let sumE = 0, sumS = 0;
   mov.forEach(m => { if (m.kind === 'E') sumE += m.qty; else sumS += m.qty; });
-  const opening = Math.max(0, ((p.stock || 0) - (sumE - sumS)));
+  const opening = Math.max(0, (invStock(p) - (sumE - sumS)));
   mov.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const rows = [{ date: '', ref: 'Saldo inicial (existencia)', ent: opening, sal: 0, run: opening }];
   let run = opening;
   mov.forEach(m => { run += (m.kind === 'E' ? m.qty : -m.qty); rows.push({ date: m.date, ref: m.ref, ent: m.kind === 'E' ? m.qty : 0, sal: m.kind === 'S' ? m.qty : 0, run }); });
-  const isChain = Array.isArray(p.units) && p.units.length > 1;
-  const disp = (v) => isChain ? decomposeKardex(p, v) : (fmtNumK(v) + ' ' + base);
-  const dispSub = (v) => isChain ? (fmtNumK(v) + ' ' + atomicUnit(p)) : '';
+  const disp = (v) => invBreakdown(p, v);
   const body = rows.map((r, i) => `
     <tr style="${i === 0 ? 'background:#eef2ff;font-weight:600' : ''}">
       <td>${r.date || '—'}</td>
       <td>${r.ref}</td>
       <td class="num">${r.ent ? fmtNumK(r.ent) : ''}</td>
       <td class="num">${r.sal ? fmtNumK(r.sal) : ''}</td>
-      <td class="num"><b>${disp(r.run)}</b>${dispSub(r.run) ? `<small style="display:block;color:#6b7280;font-weight:400">${dispSub(r.run)}</small>` : ''}</td>
+      <td class="num"><b>${disp(r.run)}</b><small style="display:block;color:#6b7280;font-weight:400">= ${fmtNumK(r.run)} ${canonU}</small></td>
     </tr>`).join('');
   const html = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:#f8fafc;border:1px solid #e2e6ec;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div>
         <div style="font-weight:800;color:#1f2937">${p.name}</div>
-        <div style="font-size:12px;color:#6b7280">${p.code} · ${p.category} · <b>${baseL(base)}</b>${p.present ? ' · ' + p.present : ''}</div>
+        <div style="font-size:12px;color:#6b7280">${p.code} · ${p.category} · <b>${canonU}</b>${p.weighed ? ' · por peso' : ''}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:11px;color:#6b7280">Existencias actuales</div>
-        <div style="font-size:20px;font-weight:800;color:#15803d;font-family:Consolas,monospace">${isChain ? decomposeKardex(p, p.stock || 0) : (fmtNumK(p.stock || 0) + ' ' + baseL(base))}</div>
-        ${isChain ? `<div style="font-size:11px;color:#6b7280">= ${fmtNumK(p.stock || 0)} ${atomicUnit(p)}</div>` : ''}
+        <div style="font-size:18px;font-weight:800;color:#15803d;font-family:Consolas,monospace">${disp(invStock(p))}</div>
+        <div style="font-size:11px;color:#6b7280">= ${fmtNumK(invStock(p))} ${canonU}</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
-      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Entradas</div><b style="color:#166534">${fmtNumK(sumE)}</b></div>
-      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Salidas</div><b style="color:#b91c1c">${fmtNumK(sumS)}</b></div>
-      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Costo/base</div><b>${fmt.money(p.cost || 0)}</b></div>
-      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Precio venta</div><b>${fmt.money(p.price || 0)}</b></div>
+      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Entradas</div><b style="color:#166534">${fmtNumK(sumE)} ${canonU}</b></div>
+      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Salidas</div><b style="color:#b91c1c">${fmtNumK(sumS)} ${canonU}</b></div>
+      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Costo unitario</div><b>${fmt.money(p.cost || 0)}</b></div>
+      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Precio unitario</div><b>${fmt.money(invUnitPrice(p))}</b></div>
     </div>
     <div style="max-height:320px;overflow:auto;border:1px solid #e2e6ec;border-radius:8px">
       <table class="dt" style="width:100%;margin:0">
@@ -460,7 +460,7 @@ function showKardex(pid) {
         <tbody>${body}</tbody>
       </table>
     </div>
-    <div style="font-size:11px;color:#6b7280;margin-top:6px">${isChain ? 'Entradas/Salidas y saldo en unidad atómica (' + atomicUnit(p) + '); el saldo se muestra descompuesto en la cadena (Cartón → Cajetilla → Cigarrillo).' : 'Unidades en <b>' + baseL(base) + '</b> (unidad base del kardex).'} La última fila = existencia actual.</div>
+    <div style="font-size:11px;color:#6b7280;margin-top:6px">Todos los movimientos y el saldo se expresan en la <b>unidad canónica (${canonU})</b>; el saldo se descompone en presentaciones. La última fila = existencia actual.</div>
   `;
   const footer = `<button class="btn" onclick="closeModal();setTimeout(function(){inventoryKardex()},60)">Buscar otro</button>
                   <button class="btn primary" onclick="closeModal()">Listo</button>`;

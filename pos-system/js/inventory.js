@@ -138,8 +138,16 @@ function invBasePres(p) { return (p && p.invBasePres) || { unidad: 'Unidad', con
 /* Unidad canónica del stock. */
 function invBaseUnit(p) { return (p && p.invBaseUnit) || 'Unidad'; }
 
-/* Stock SIEMPRE en unidades canónicas. */
-function invStock(p) { return Number((p && p.stockBase) || 0); }
+/* Stock SIEMPRE en unidades canónicas. Respaldado por p.stock (legado) hasta normalizar. */
+function invStock(p) { return Number((p && (p.stockBase != null ? p.stockBase : p.stock)) || 0); }
+
+/* Precio por 1 unidad canónica (para valoración / catálogo). */
+function invUnitPrice(p) {
+  const u = invSaleViews(p).find(x => x.equiv === 1);
+  if (u) return u.precio;
+  const b = invBasePres(p);
+  return Number(b.precio) / Math.max(1, Number(b.contenido) || 1);
+}
 
 /* Presentaciones de venta normalizadas (garantiza activas con precio resuelto). */
 function invPreset(p) {
