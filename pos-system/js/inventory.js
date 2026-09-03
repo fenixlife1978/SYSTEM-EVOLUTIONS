@@ -220,6 +220,106 @@ function invMove(p, equiv, qty, dir) {
   return { delta, stock: p.stockBase };
 }
 
+/* ---------- Normalización canónica (fuente única) ---------- */
+
+/* Traduce códigos de unidad legados (UND, KG, GMS, LT, ML…) a nombres de catálogo. */
+function canonUnitName(codeOrName) {
+  const map = {
+    UND: 'Unidad', KG: 'Kilogramo', GMS: 'Gramo', G: 'Gramo', GR: 'Gramo',
+    LT: 'Litro', L: 'Litro', ML: 'Mililitro', M: 'Metro', CM: 'Centímetro'
+  };
+  const key = String(codeOrName || '').trim();
+  const out = map[key.toUpperCase()] || key || 'Unidad';
+  ensureUnitsCatalog();
+  // Si aún no existe en el catálogo, se registra (para que unitInUse y selects la conozcan).
+  if (!db.units.find(u => u.name.toLowerCase() === out.toLowerCase())) {
+    db.units.push({ id: db.units.reduce((m, u) => Math.max(m, Number(u.id) || 0), 0) + 1, name: out, symbol: out, type: 'unit' });
+  }
+  return out;
+}
+
+/* Convierte un producto (canónico o legado) al modelo canónico en su lugar.
+   Garantiza UN SOLO stock: p.stockBase (unidad invBaseUnit). El resultado
+   es idempotente: si ya es canónico solo asegura mínimos. */
+function canonicalizeProduct(p) {
+  if (!p) return p;
+  ensureUnitsCatalog();
+  const has = p.invBasePres && p.invBaseUnit && typeof p.stockBase === 'number';
+  if (has) { if (p.stockMinimo == null) p.stockMinimo = 0; if (p.stockMaximo == null) p.stockMaximo = 0; return p; }
+
+  const chain = (Array.isArray(p.units) && p.units.length) ? p.units : null;
+  const canonUnit = chain ? String(chain[chain.length - 1].name) : canonUnitName(p.base || p.unit || 'UND');
+  let contenido = 1;
+  let topUnit = canonUnit;
+  if (chain && chain.length > 1) {
+    topUnit = String(chain[0].name);
+    contenido = 1;
+    for (const u of chain) contenido *= Number(u.rel) || 1;
+  }
+  const atomicPrice = Number(p.price) || 0;
+  // Presentación maestra: el "todo" con el que se representa el stock.
+  p.invBasePres = { unidad: canonUnitName(topUnit), contenido, precio: Number(contenido > 1 ? atomicPrice * contenido : atomicPrice) || 0 };
+  p.invBaseUnit = canonUnit;
+  p.stockBase = Number(p.stock) || 0;
+
+  // Presentaciones de venta (formas en que se vende).
+  const pres = [];
+  const addPres = (unidad, equiv, precio, tipo) => {
+    const un = canonUnitName(unidad);
+    if (pres.find(x => x.unidad === un && x.equiv === equiv)) return;
+    pres.push({ id: pres.length + 1, unidad: un, equiv, precio: Number(precio) || 0, tipo: tipo || 'MANUAL', activa: true });
+  };
+  // Siempre la presentación base (el "todo").
+  addPres(topUnit, contenido, p.invBasePres.precio, 'MANUAL');
+  // Cadena de unidades jerárquica (Cartón → Cajetilla → Cigarrillo).
+  if (chain && chain.length > 1) {
+    let f = 1;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      f *= Number(chain[i].rel) || 1;
+      const name = String(chain[i].name);
+      if (i === chain.length - 1) continue; // la atómica ya se cubre vía base simple
+      addPres(name, f, 0, 'MANUAL'); // precio se rellenará si hay referencia en p.pres
+    }
+  }
+  // Presentaciones personalizadas p.pres con precio explícito.
+  (Array.isArray(p.pres) ? p.pres : []).forEach(pr => {
+    const eq = Number(pr.content != null ? pr.content : (pr.qty * (factorUnit(chain, pr.u)) ) );
+    const un = canonUnitName(pr.lbl || pr.u || pr.name || '');
+    addPres(un, eq > 0 ? eq : 1, pr.price, 'MANUAL');
+  });
+  // Si quedó una única presentación que no es la base simple, asegurar una entrada atómica.
+  if (pres.length === 1 && pres[0].equiv !== 1) addPres(canonUnit, 1, atomicPrice, 'MANUAL');
+  // Asegurar siempre una venta unitaria (1 unidad canónica) si aún no está representada.
+  addPres(canonUnit, 1, atomicPrice, 'MANUAL');
+  p.invPres = pres;
+
+  // Limpieza: el stock deja de vivir en p.stock (fuente única = stockBase).
+  if (typeof p.stock === 'number') p.stock = undefined;
+  if (p.stockMinimo == null) p.stockMinimo = 0;
+  if (p.stockMaximo == null) p.stockMaximo = 0;
+  p.weighed = !!p.weighed;
+  return p;
+}
+
+function factorUnit(chain, name) {
+  if (!Array.isArray(chain) || !chain.length) return 1;
+  const i = chain.findIndex(u => String(u.name) === String(name));
+  if (i < 0) return 1;
+  let f = 1;
+  for (let j = i; j < chain.length; j++) f *= Number(chain[j].rel) || 1;
+  return f;
+}
+
+/* Precio representativo para catálogo/POS: el de la presentación base ("todo"). */
+function invDefaultPrice(p) {
+  return Number(invBasePres(p).precio) || 0;
+}
+
+/* Presentaciones de venta activas con su precio ya resuelto. */
+function invSaleViews(p) {
+  return invPreset(p).filter(x => x.activa).map(x => ({ unidad: x.unidad, equiv: x.equiv, precio: resolvePrice(p, x), tipo: x.tipo, base: x.base }));
+}
+
 /* ---------- Autocomprobación (consola) ---------- */
 function invDemo() {
   console.log('===== FASE 1 · Motor de inventario =====');
