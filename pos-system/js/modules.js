@@ -677,8 +677,12 @@ function productForm(id) {
   const canon = invBaseUnit(p);
   const isWeighed = p.weighed === true;
   const taxSel = p.taxed === false ? 'exento' : 'grabable';
+  const gainVal = Math.min(99.99, Math.max(0, Number(p.margin != null ? p.margin : 30)));
   const existing = (Array.isArray(p.invPres) && p.invPres.length) ? p.invPres.map((x, i) => ({ i, unidad: x.unidad, equiv: x.equiv, precio: x.precio, tipo: (x.tipo || 'MANUAL'), activa: x.activa !== false, base: !!x.base })) : [];
-  let rows = existing.length ? existing : [{ i: -1, unidad: canon, equiv: 1, precio: 0, tipo: 'MANUAL', activa: true, base: false }];
+  const exBase = existing.find(x => x.base);
+  const baseRow = { unidad: bp.unidad || 'Unidad', equiv: bp.contenido || 1, precio: Number(bp.precio) || 0, tipo: (exBase ? exBase.tipo : 'MANUAL'), activa: true, base: true };
+  const others = existing.filter(x => !x.base).map(x => ({ unidad: x.unidad, equiv: x.equiv, precio: x.precio, tipo: (x.tipo || 'MANUAL'), activa: x.activa !== false, base: false }));
+  let rows = [baseRow, ...others];
 
   const html = `
     <div class="form-grid">
@@ -692,34 +696,31 @@ function productForm(id) {
         <label style="font-weight:500;display:flex;align-items:center;gap:6px"><input type="checkbox" id="pcWeighed" ${isWeighed ? 'checked' : ''}/> Se vende por peso variable (balanza)</label>
       </div>
     </div>
-    <div style="background:#eef6ff;border:1px solid #bcd7f5;border-radius:8px;padding:8px 12px;font-size:12px;color:#1e40af;margin-bottom:12px">
-      Modelo de inventario: <b>un solo stock</b>, guardado en la <b>unidad canónica</b> indicada abajo. Todas las presentaciones de venta son conversiones de esa unidad.
-    </div>
     <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px;margin-bottom:12px">
       <b style="font-size:13px;color:#1f2937">Presentación base (maestra)</b>
       <div class="form-grid" style="margin-top:10px">
         <div class="field"><label>Unidad (el "todo")</label><select id="pcBaseUnit">${uOpt(bp.unidad || 'Unidad')}</select></div>
         <div class="field"><label>Contenido</label><input type="number" step="0.001" min="0.001" id="pcBaseCont" value="${Number(bp.contenido) || 1}" /></div>
         <div class="field"><label>Unidad canónica (la contenida)</label><select id="pcCanon">${uOpt(canon)}</select></div>
-        <div class="field"><label>Precio de la presentación base (USD)</label><input type="number" step="0.01" min="0" id="pcBasePrice" value="${Number(bp.precio) || 0}" /></div>
       </div>
       <div id="pcEquiv" style="font-size:12px;color:#0c8a4a;font-weight:600;margin-top:4px"></div>
     </div>
     <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px;margin-bottom:12px">
-      <b style="font-size:13px;color:#1f2937">Existencia</b>
+      <b style="font-size:13px;color:#1f2937">Existencia y precios</b>
       <div class="form-grid" style="margin-top:10px">
         <div class="field"><label>Stock (en unidad canónica)</label><input type="number" step="0.001" min="0" id="pcStock" value="${Number(p.stockBase) || 0}" /></div>
         <div class="field"><label>Stock mínimo</label><input type="number" step="0.001" min="0" id="pcStockMin" value="${Number(p.stockMinimo) || 0}" /></div>
         <div class="field"><label>Stock máximo</label><input type="number" step="0.001" min="0" id="pcStockMax" value="${Number(p.stockMaximo) || 0}" /></div>
-        <div class="field"><label>Costo unitario USD (referencia)</label><input type="number" step="0.0001" min="0" id="pcCost" value="${Number(p.cost) || 0}" /></div>
+        <div class="field"><label>Costo (USD por unidad canónica)</label><input type="number" step="0.0001" min="0" id="pcCost" value="${Number(p.cost) || 0}" /></div>
+        <div class="field"><label>% Ganancia</label><input type="number" step="0.01" min="0" max="99.99" id="pcGain" value="${gainVal}" /></div>
       </div>
+      <div style="font-size:11px;color:#6b7280;margin-top:4px">El precio <b>automático</b> de una presentación = Costo × (1 + %Ganancia/100) × equivalencia. Si es <b>manual</b>, al editar el precio se recalcula el %Ganancia (máx. 99.99%).</div>
     </div>
     <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <b style="font-size:13px;color:#1f2937">Presentaciones / formas de venta</b>
+        <b style="font-size:13px;color:#1f2937">Presentaciones / precios de venta</b>
         <button type="button" class="btn sm primary" id="pcAdd">+ Agregar presentación</button>
       </div>
-      <div style="font-size:11px;color:#6b7280;margin-bottom:6px">Equivalencia = cuántas <b>unidades canónicas</b> representa una unidad vendida. Precio <b>Automático</b> = (precio base ÷ contenido) × equivalencia.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px">
         <span style="display:flex;align-items:center;justify-content:center">Unidad de venta</span><span style="display:flex;align-items:center;justify-content:center">Equivalencia</span><span style="display:flex;align-items:center;justify-content:center">Precio USD</span><span style="display:flex;align-items:center;justify-content:center">Tipo de precio</span><span style="display:flex;align-items:center;justify-content:center">Activa</span><span></span>
       </div>
@@ -730,68 +731,95 @@ function productForm(id) {
                   <button class="btn primary" id="pcSave">Guardar</button>`;
   openModal({ title: editing ? 'Editar producto' : 'Nuevo producto', body: html, footer, size: 'modal-lg' });
   setTimeout(() => {
-    const $pc = (s) => $('#pcRows').querySelector(s);
-    const pcBaseUnit = $('#pcBaseUnit'), pcBaseCont = $('#pcBaseCont'), pcCanon = $('#pcCanon'), pcBasePrice = $('#pcBasePrice');
-    const showEquiv = () => {
-      const c = parseFloat(pcBaseCont.value) || 1;
-      $('#pcEquiv').textContent = '1 ' + (pcBaseUnit.value || '?') + ' = ' + c + ' ' + (pcCanon.value || '?');
-    };
-    [pcBaseUnit, pcBaseCont, pcCanon].forEach(el => el.addEventListener('change', showEquiv)); pcBaseCont.addEventListener('input', showEquiv);
-    // auto price preview for a row given (canon, contenido)
-    const autoPrice = (equiv) => ( (parseFloat(pcBasePrice.value) || 0) / (parseFloat(pcBaseCont.value) || 1) ) * equiv;
+    const pcBaseUnit = $('#pcBaseUnit'), pcBaseCont = $('#pcBaseCont'), pcCanon = $('#pcCanon');
+    const pcCost = $('#pcCost'), pcGain = $('#pcGain');
+    const contenido = () => parseFloat(pcBaseCont.value) || 1;
+    const cost = () => parseFloat(pcCost.value) || 0;
+    const gain = () => Math.min(99.99, Math.max(0, parseFloat(pcGain.value) || 0));
+    const setGain = (g) => { pcGain.value = (Math.min(99.99, Math.max(0, g))).toFixed(2); };
+    // Precio resuelto de la presentación base (todo)
+    const baseResolved = () => rows[0].tipo === 'AUTO' ? cost() * (1 + gain() / 100) * contenido() : (parseFloat(rows[0].precio) || 0);
+    const rowAuto = (equiv) => (baseResolved() / contenido()) * equiv;
+
+    const showEquiv = () => { $('#pcEquiv').textContent = '1 ' + (pcBaseUnit.value || '?') + ' = ' + contenido() + ' ' + (pcCanon.value || '?'); };
 
     const paintRows = () => {
       const box = $('#pcRows'); if (!box) return; box.innerHTML = '';
       rows.forEach((r, idx) => {
+        const isBase = idx === 0;
+        const auto = r.tipo === 'AUTO';
+        const unVal = isBase ? (pcBaseUnit.value || 'Unidad') : r.unidad;
+        const eqVal = isBase ? contenido() : (parseFloat(r.equiv) || 1);
+        const priceVal = isBase ? (auto ? baseResolved() : (parseFloat(r.precio) || 0)) : (auto ? rowAuto(eqVal) : (parseFloat(r.precio) || 0));
         const div = document.createElement('div');
         div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;align-items:center';
-        const auto = r.tipo === 'AUTO';
         div.innerHTML = `
-          <select class="pr-un" data-i="${idx}">${uOpt(r.unidad || 'Unidad')}</select>
-          <input type="number" class="pr-eq" step="0.001" min="0.001" value="${Number(r.equiv) || 1}" data-i="${idx}" />
-          <input type="number" class="pr-pr" step="0.0001" min="0" value="${auto ? autoPrice(Number(r.equiv) || 1).toFixed(4) : (Number(r.precio) || 0)}" data-i="${idx}" ${auto ? 'readonly style="background:#f3f4f6"' : ''} />
+          <select class="pr-un" data-i="${idx}" ${isBase ? 'disabled' : ''}>${uOpt(unVal)}</select>
+          <input type="number" class="pr-eq" step="0.001" min="0.001" value="${eqVal}" data-i="${idx}" ${isBase ? 'disabled' : ''} />
+          <input type="number" class="pr-pr" step="0.0001" min="0" value="${priceVal.toFixed(4)}" data-i="${idx}" ${auto ? 'readonly style="background:#f3f4f6"' : 'style="width:100%;box-sizing:border-box"'}/>
           <select class="pr-tp" data-i="${idx}"><option value="MANUAL" ${!auto ? 'selected' : ''}>Manual</option><option value="AUTO" ${auto ? 'selected' : ''}>Automático</option></select>
-          <label style="font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px"><input type="checkbox" class="pr-act" data-i="${idx}" ${r.activa ? 'checked' : ''}/> Activa</label>
-          <button type="button" class="btn sm danger pr-del" data-i="${idx}" title="Quitar">&times;</button>`;
+          <label style="font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px${isBase ? ';opacity:.6' : ''}"><input type="checkbox" class="pr-act" data-i="${idx}" ${r.activa ? 'checked' : ''} ${isBase ? 'disabled' : ''}/> Activa</label>
+          <button type="button" class="btn sm danger pr-del" data-i="${idx}" title="Quitar" ${isBase ? 'disabled style="visibility:hidden"' : ''}>&times;</button>`;
         box.appendChild(div);
       });
-      box.querySelectorAll('.pr-un').forEach(el => el.addEventListener('change', () => { rows[+el.dataset.i].unidad = el.value; }));
-      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = parseFloat(el.value) || 1; if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = autoPrice(r.equiv).toFixed(4); } }));
-      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; if (r.tipo !== 'AUTO') r.precio = parseFloat(el.value) || 0; }));
-      box.querySelectorAll('.pr-tp').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; r.tipo = el.value; const rowDiv = el.closest('div'); const pIn = rowDiv.querySelector('.pr-pr'); const eq = r.equiv; if (r.tipo === 'AUTO') { pIn.readOnly = true; pIn.style.background = '#f3f4f6'; pIn.value = autoPrice(eq).toFixed(4); } else { pIn.readOnly = false; pIn.style.background = ''; pIn.value = r.precio || 0; } }));
-      box.querySelectorAll('.pr-act').forEach(el => el.addEventListener('change', () => { rows[+el.dataset.i].activa = el.checked; }));
-      box.querySelectorAll('.pr-del').forEach(el => el.addEventListener('click', () => { rows.splice(+el.dataset.i, 1); paintRows(); }));
+      box.querySelectorAll('.pr-un').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; r.unidad = el.value; }));
+      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = parseFloat(el.value) || 1; if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = rowAuto(r.equiv).toFixed(4); } }));
+      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('input', () => {
+        const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return;
+        r.precio = parseFloat(el.value) || 0;
+        const c = cost(); if (c > 0) { const e = el.closest('div').querySelector('.pr-eq') ? (parseFloat(el.closest('div').querySelector('.pr-eq').value) || 1) : (containedFor(r)); setGain((((r.precio / e) - c) / c) * 100); paintRows(); }
+      }));
+      box.querySelectorAll('.pr-tp').forEach(el => el.addEventListener('change', () => {
+        const r = rows[+el.dataset.i]; r.tipo = el.value;
+        const rowDiv = el.closest('div'); const pIn = rowDiv.querySelector('.pr-pr'); const eq = rowDiv.querySelector('.pr-eq');
+        const eqv = isBase0(el) ? contenido() : (parseFloat(eq.value) || 1);
+        if (r.tipo === 'AUTO') { pIn.readOnly = true; pIn.style.background = '#f3f4f6'; pIn.value = ((isBase0(el) ? baseResolved() : rowAuto(eqv))).toFixed(4); }
+        else { pIn.readOnly = false; pIn.style.background = ''; pIn.value = r.precio || 0; }
+      }));
+      box.querySelectorAll('.pr-act').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; if (!r.base) r.activa = el.checked; }));
+      box.querySelectorAll('.pr-del').forEach(el => el.addEventListener('click', () => { if (rows[+el.dataset.i].base) return; rows.splice(+el.dataset.i, 1); paintRows(); }));
+      // garantizar que los selects/inputs se vean a ancho completo y alineados
+      box.querySelectorAll('select, input').forEach(el => { if (el.style.width !== '100%') { el.style.width = '100%'; el.style.boxSizing = 'border-box'; } });
     };
-    $('#pcAdd').addEventListener('click', () => { rows.push({ unidad: pcCanon.value || 'Unidad', equiv: 1, precio: 0, tipo: 'MANUAL', activa: true }); paintRows(); });
-    paintRows();
-    showEquiv();
+    const containedFor = () => contenido();
+    const isBase0 = (el) => rows[+el.dataset.i].base;
+
+    const repaintAll = () => { paintRows(); showEquiv(); };
+    $('#pcAdd').addEventListener('click', () => { rows.push({ unidad: pcCanon.value || 'Unidad', equiv: 1, precio: 0, tipo: 'AUTO', activa: true, base: false }); paintRows(); });
+    [pcBaseUnit, pcCanon].forEach(el => el.addEventListener('change', repaintAll));
+    [pcBaseCont, pcCost].forEach(el => el.addEventListener('input', repaintAll));
+    pcGain.addEventListener('input', repaintAll);
+    paintRows(); showEquiv();
 
     $('#pcSave').addEventListener('click', () => {
       const code = $('#pcCode').value.trim();
       const name = $('#pcName').value.trim();
       if (!name) { toast('Ingrese el nombre del producto', 'warn'); return; }
-      const contenido = parseFloat(pcBaseCont.value) || 1;
+      const cnt = contenido();
       const unidadBase = pcBaseUnit.value || pcCanon.value || 'Unidad';
       const canonU = pcCanon.value || 'Unidad';
-      const basePrice = parseFloat(pcBasePrice.value) || 0;
-      const invPres = rows
-        .filter(r => r.unidad && r.unidad.trim())
-        .map(r => ({ unidad: r.unidad, equiv: parseFloat(r.equiv) || 1, precio: r.tipo === 'AUTO' ? autoPrice(r.equiv) : (parseFloat(r.precio) || 0), tipo: r.tipo, activa: r.activa !== false }))
-        .filter(r => r.equiv > 0);
+      const baseRes = baseResolved();
+      const invPres = rows.map((r, i) => {
+        const isB = i === 0;
+        const eq = isB ? cnt : (parseFloat(r.equiv) || 1);
+        const unidad = isB ? unidadBase : r.unidad;
+        const precio = r.tipo === 'AUTO' ? (isB ? baseRes : rowAuto(eq)) : (parseFloat(r.precio) || 0);
+        return { unidad, equiv: eq, precio, tipo: r.tipo, activa: r.activa !== false, base: isB };
+      }).filter(r => r.equiv > 0 && r.unidad);
       const prod = {
         id: editing ? source.id : (Date.now()),
         code: code || ('P' + Date.now()),
         name, category: $('#pcCat').value.trim() || 'General',
         taxed: $('#pcTax').value === 'grabable',
         weighed: $('#pcWeighed').checked,
-        invBasePres: { unidad: unidadBase, contenido, precio: basePrice },
+        invBasePres: { unidad: unidadBase, contenido: cnt, precio: baseRes },
         invBaseUnit: canonU,
         invPres,
         stockBase: parseFloat($('#pcStock').value) || 0,
         stockMinimo: parseFloat($('#pcStockMin').value) || 0,
         stockMaximo: parseFloat($('#pcStockMax').value) || 0,
-        cost: parseFloat($('#pcCost').value) || 0,
-        margin: 0
+        cost: cost(),
+        margin: gain()
       };
       canonicalizeProduct(prod);
       if (editing) Object.assign(source, prod); else db.products.push(prod);
