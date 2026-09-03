@@ -721,7 +721,7 @@ function productForm(id) {
       </div>
       <div style="font-size:11px;color:#6b7280;margin-bottom:6px">Equivalencia = cuántas <b>unidades canónicas</b> representa una unidad vendida. Precio <b>Automático</b> = (precio base ÷ contenido) × equivalencia.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px">
-        <span style="text-align:center">Unidad de venta</span><span style="text-align:center">Equivalencia</span><span style="text-align:center">Precio USD</span><span style="text-align:center">Tipo de precio</span><span style="text-align:center">Activa</span><span></span>
+        <span style="display:flex;align-items:center;justify-content:center">Unidad de venta</span><span style="display:flex;align-items:center;justify-content:center">Equivalencia</span><span style="display:flex;align-items:center;justify-content:center">Precio USD</span><span style="display:flex;align-items:center;justify-content:center">Tipo de precio</span><span style="display:flex;align-items:center;justify-content:center">Activa</span><span></span>
       </div>
       <div id="pcRows" style="display:flex;flex-direction:column;gap:6px"></div>
     </div>
