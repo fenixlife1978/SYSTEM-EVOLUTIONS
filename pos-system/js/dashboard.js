@@ -51,7 +51,8 @@ function renderOverview() {
   const totalCxp = db.payables.reduce((s, p) => s + p.balance, 0);
   const monthIncome = db.accounting.filter(a => a.type === 'ingreso' && a.date.startsWith(today.slice(0, 7))).reduce((s, a) => s + a.amount, 0);
   const monthExpense = db.accounting.filter(a => a.type === 'egreso' && a.date.startsWith(today.slice(0, 7))).reduce((s, a) => s + a.amount, 0);
-  const lowStock = db.products.filter(p => p.stock < 30).length;
+  const prods = db.products.map(p => { canonicalizeProduct(p); return p; });
+  const lowStock = prods.filter(p => invStock(p) < Math.max(1, Number(p.stockMinimo) || 20)).length;
 
   $('#dashContent').innerHTML = `
     <div class="session-card">
@@ -131,13 +132,13 @@ function renderOverview() {
         <table class="dt">
           <thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th class="num">Stock</th><th>Estado</th></tr></thead>
           <tbody>
-            ${db.products.filter(p => p.stock < 50).slice(0, 8).map(p => `
+            ${prods.filter(p => invStock(p) < Math.max(1, Number(p.stockMinimo) || 20)).slice(0, 8).map(p => `
               <tr>
                 <td><code>${p.code}</code></td>
                 <td>${p.name}</td>
                 <td>${p.category}</td>
-                <td class="num">${p.stock}</td>
-                <td>${p.stock < 20 ? '<span class="pill red">Crítico</span>' : '<span class="pill yellow">Bajo</span>'}</td>
+                <td class="num">${invStock(p)} ${invBaseUnit(p)}</td>
+                <td>${invStock(p) < (Math.max(1, Number(p.stockMinimo) || 20) * 0.5) ? '<span class="pill red">Crítico</span>' : '<span class="pill yellow">Bajo</span>'}</td>
               </tr>`).join('')}
           </tbody>
         </table>
@@ -167,8 +168,8 @@ function renderSalesChart() {
 }
 
 function renderTopProducts() {
-  // Tomamos productos con más stock como "top vendidos" demo
-  const top = [...db.products].sort((a, b) => b.stock - a.stock).slice(0, 5);
+  // Tomamos productos con más stock canónico como "top" demo
+  const top = db.products.map(p => { canonicalizeProduct(p); return p; }).sort((a, b) => invStock(b) - invStock(a)).slice(0, 5);
   return `<div class="activity">
     ${top.map((p, i) => `
       <div class="item">
@@ -178,8 +179,8 @@ function renderTopProducts() {
           <small>${p.code} · ${p.category}</small>
         </div>
         <div style="text-align:right">
-          <b>${fmt.money(p.price)}</b>
-          <small style="display:block;color:#6b7280">${p.stock} en stock</small>
+          <b>${fmt.money(invUnitPrice(p))}</b>
+          <small style="display:block;color:#6b7280">${invBreakdown(p, invStock(p))}</small>
         </div>
       </div>`).join('')}
   </div>`;

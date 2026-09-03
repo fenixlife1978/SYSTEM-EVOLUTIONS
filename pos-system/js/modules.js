@@ -224,7 +224,7 @@ function purchaseForm() {
     // Sumar stock por producto (en unidad base)
     const acc = {};
     state.items.forEach(i => { acc[i.pid] = (acc[i.pid] || 0) + i.baseQty; });
-    Object.keys(acc).forEach(pid => { const pr = db.products.find(x => x.id === +pid); if (pr) { canonicalizeProduct(pr); pr.stockBase = (invStock(pr) || 0) + acc[pid]; pr.stock = pr.stockBase; } });
+    Object.keys(acc).forEach(pid => { const pr = db.products.find(x => x.id === +pid); if (pr) { canonicalizeProduct(pr); pr.stockBase = (invStock(pr) || 0) + acc[pid]; } });
     const total = state.items.reduce((s, i) => s + (i.baseQty * i.costBase), 0);
     const purchase = {
       id: db.purchases.length + 1,
@@ -1650,21 +1650,24 @@ function renderReports() {
 }
 
 function reportInventory() {
-  const total = db.products.reduce((s, p) => s + p.stock * p.price, 0);
+  const plist = db.products.map(p => { canonicalizeProduct(p); return p; });
+  const total = plist.reduce((s, p) => s + invStock(p) * invUnitPrice(p), 0);
+  const units = plist.reduce((s, p) => s + invStock(p), 0);
+  const csvRows = plist.map(p => `${p.code},"${String(p.name).replace(/"/g, '""')}",${p.category},${invStock(p)},${invUnitPrice(p)},${(invStock(p) * invUnitPrice(p)).toFixed(2)}`).join('\n');
   openModal({ title: 'Reporte de inventario', size: 'modal-lg', body: `
     <div style="display:flex;gap:14px;margin-bottom:12px">
-      <div class="kpi" style="flex:1"><div class="kpi-info"><div class="lbl">Total productos</div><div class="val">${db.products.length}</div></div></div>
-      <div class="kpi" style="flex:1"><div class="kpi-info"><div class="lbl">Unidades</div><div class="val">${db.products.reduce((s, p) => s + p.stock, 0).toFixed(0)}</div></div></div>
+      <div class="kpi" style="flex:1"><div class="kpi-info"><div class="lbl">Total productos</div><div class="val">${plist.length}</div></div></div>
+      <div class="kpi" style="flex:1"><div class="kpi-info"><div class="lbl">Unidades (canónicas)</div><div class="val">${units.toFixed(0)}</div></div></div>
       <div class="kpi" style="flex:1"><div class="kpi-info"><div class="lbl">Valor total</div><div class="val">${fmt.money(total)}</div></div></div>
     </div>
     <div class="dt-wrap" style="max-height:400px;overflow:auto">
       <table class="dt">
-        <thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th class="num">Stock</th><th class="num">Precio</th><th class="num">Valor</th></tr></thead>
-        <tbody>${db.products.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td class="num">${p.stock}</td><td class="num">${fmt.money(p.price)}</td><td class="num">${fmt.money(p.stock * p.price)}</td></tr>`).join('')}</tbody>
+        <thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Stock</th><th class="num">Precio/unidad</th><th class="num">Valor</th></tr></thead>
+        <tbody>${plist.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td>${invBreakdown(p, invStock(p))} <small>(${invStock(p)} ${invBaseUnit(p)})</small></td><td class="num">${fmt.money(invUnitPrice(p))}</td><td class="num">${fmt.money(invStock(p) * invUnitPrice(p))}</td></tr>`).join('')}</tbody>
       </table>
     </div>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
-              <button class="btn primary" onclick="exportReport('inventario',${JSON.stringify(db.products.map(p => `${p.code},${p.name},${p.category},${p.stock},${p.price},${p.stock * p.price}`).join('\\n')).replace(/"/g,'&quot;')})">Exportar CSV</button>` });
+              <button class="btn primary" onclick="exportReport('inventario',${JSON.stringify(csvRows).replace(/"/g, '&quot;')})">Exportar CSV</button>` });
 }
 
 function reportSales() {
@@ -1717,11 +1720,11 @@ function reportPurchases() {
 }
 
 function reportTop() {
-  const top = [...db.products].sort((a, b) => b.stock - a.stock).slice(0, 10);
+  const top = db.products.map(p => { canonicalizeProduct(p); return p; }).sort((a, b) => invStock(b) - invStock(a)).slice(0, 10);
   openModal({ title: 'Top 10 productos', body: `
     <table class="dt" style="width:100%">
-      <thead><tr><th>#</th><th>Producto</th><th>Categoría</th><th class="num">Stock</th><th class="num">Precio</th></tr></thead>
-      <tbody>${top.map((p, i) => `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.category}</td><td class="num">${p.stock}</td><td class="num">${fmt.money(p.price)}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>#</th><th>Producto</th><th>Categoría</th><th>Stock</th><th class="num">Precio/unidad</th></tr></thead>
+      <tbody>${top.map((p, i) => `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.category}</td><td>${invStock(p)} ${invBaseUnit(p)}</td><td class="num">${fmt.money(invUnitPrice(p))}</td></tr>`).join('')}</tbody>
     </table>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>` });
 }

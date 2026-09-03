@@ -309,16 +309,10 @@ function canonicalizeProduct(p) {
   return applyAlias(p);
 }
 
-/* Alias transitorio de compatibilidad: p.stock refleja EXACTAMENTE stockBase
-   (un solo valor), y p.price es el precio por 1 unidad canónica (para vistas
-   que aún leen el modelo legado). No son stocks independientes: son la misma
-   cantidad. Se eliminará al migrar todos los consumidores a stockBase. */
+/* Precio representativo de catálogo/POS: precio por 1 unidad canónica (equiv 1)
+   o, si no hay presentación unitaria, derivado de la presentación base. */
 function applyAlias(p) {
-  const sb = invStock(p);
-  p.stock = sb;
-  // Precio por unidad canónica (equiv 1) si existe, si no se deriva de la base.
-  const u = invSaleViews(p).find(x => x.equiv === 1);
-  p.price = u ? u.precio : invBasePres(p).precio / Math.max(1, Number(invBasePres(p).contenido) || 1);
+  p.price = invUnitPrice(p);
   return p;
 }
 

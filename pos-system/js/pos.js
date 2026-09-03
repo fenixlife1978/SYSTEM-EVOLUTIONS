@@ -224,6 +224,7 @@ function posSearch() {
       const list = db.products.filter(p =>
         !q || p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
       ).slice(0, 50);
+      list.forEach(canonicalizeProduct);
       $('#psResults').innerHTML = list.length === 0
         ? `<div class="empty-state" style="padding:20px"><span class="ico">${ico('search')}</span>Sin resultados</div>`
         : `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Descripción</th><th class="num">Precio USD</th><th class="num">Precio Bs.</th><th class="num">Stock</th><th></th></tr></thead><tbody>
@@ -233,7 +234,7 @@ function posSearch() {
                 <td>${p.name}</td>
                 <td class="num">${fmt.money(p.price)}</td>
                 <td class="num">${fmt.bs(p.price)}</td>
-                <td class="num">${p.stock}</td>
+                <td class="num" title="${invStock(p)} ${invBaseUnit(p)}">${invBreakdown(p, invStock(p))}</td>
                 <td><button class="btn sm primary" data-add="${p.id}">Agregar</button></td>
               </tr>`).join('')}
           </tbody></table>`;
@@ -552,9 +553,7 @@ function finalizeSale(total, base, tax) {
     const pr = db.products.find(x => x.id === it.id);
     if (pr) {
       canonicalizeProduct(pr);
-      const rest = Math.max(0, invStock(pr) - (it.qty * (it.content || 1)));
-      pr.stockBase = rest;
-      pr.stock = rest; // alias transitorio (mismo valor)
+      pr.stockBase = Math.max(0, invStock(pr) - (it.qty * (it.content || 1)));
     }
   });
   // Si es crédito, generar CxC y acumular la deuda del cliente
@@ -1170,9 +1169,10 @@ function posPrices() {
     in_.addEventListener('input', () => {
       const q = in_.value.toLowerCase().trim();
       const list = db.products.filter(p => !q || p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)).slice(0, 12);
+      list.forEach(canonicalizeProduct);
       $('#prRes').innerHTML = list.length === 0 ? '<div class="empty-state" style="padding:14px">Sin resultados</div>' :
         `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Descripción</th><th class="num">Precio USD</th><th class="num">Precio Bs.</th><th class="num">Stock</th></tr></thead><tbody>
-          ${list.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td class="num">${fmt.money(p.price)}</td><td class="num">${fmt.bs(p.price)}</td><td class="num">${p.stock}</td></tr>`).join('')}
+          ${list.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td class="num">${fmt.money(invUnitPrice(p))}</td><td class="num">${fmt.bs(invUnitPrice(p))}</td><td class="num">${invStock(p)} ${invBaseUnit(p)}</td></tr>`).join('')}
         </tbody></table>`;
     });
     in_.dispatchEvent(new Event('input'));
