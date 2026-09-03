@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>POSsystem Evolution — Sistema POS y Administración</title>
+<link rel="stylesheet" href="css/main.css" />
+<link rel="stylesheet" href="css/pos.css" />
+<link rel="stylesheet" href="css/dashboard.css" />
+</head>
+<body>
+
+<!-- ============== LOGIN ============== -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-logo">
+        <span class="ll-line ll-p1">POSsystem</span>
+        <svg class="ll-swoosh" viewBox="0 0 320 26" width="320" height="26" preserveAspectRatio="none">
+          <path d="M8 22 C 100 2, 220 2, 312 14" fill="none" stroke="#2f9fd0" stroke-width="3.5" stroke-linecap="round"/>
+          <path d="M60 22 C 140 12, 240 12, 312 14" fill="none" stroke="#e8742b" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <span class="ll-line ll-p2">Evolution</span>
+        <span class="ll-line ll-p3">VENEZUELA</span>
+      </div>
+      <p class="login-sub">Administración</p>
+    </div>
+    <div class="login-body">
+      <div class="role-tabs" id="roleTabs">
+        <button type="button" class="rtab active" data-role="admin">Administrador</button>
+        <button type="button" class="rtab" data-role="cashier">Cajero</button>
+      </div>
+      <form id="loginForm" class="login-form">
+        <label>Usuario
+          <input type="text" id="loginUser" value="admin" required autocomplete="username" />
+        </label>
+        <label>Contraseña
+          <input type="password" id="loginPass" value="admin" required autocomplete="current-password" />
+        </label>
+        <label>Caja
+          <select id="loginCaja">
+            <option>Caja Principal</option>
+            <option>Caja Norte</option>
+            <option>Caja Sur</option>
+          </select>
+        </label>
+        <button type="submit" class="btn-login">INGRESAR AL SISTEMA</button>
+      </form>
+      <p class="login-hint">Demo local &#8195; Usuario: admin &#8195; Clave: 1234</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============== MAIN APP ============== -->
+<div id="mainApp" class="app-shell" style="display:none;">
+
+  <!-- Top Bar (solo dashboard) -->
+  <header id="topBar" class="top-bar" style="display:none;">
+    <div class="top-left">
+      <div class="brand">
+        <div class="brand-logo">
+          <span class="bl-l1">POSsystem</span>
+          <svg class="bl-swoosh" viewBox="0 0 320 26" width="132" height="11" preserveAspectRatio="none">
+            <path d="M8 22 C 100 2, 220 2, 312 14" fill="none" stroke="#2f9fd0" stroke-width="3.5" stroke-linecap="round"/>
+            <path d="M60 22 C 140 12, 240 12, 312 14" fill="none" stroke="#e8742b" stroke-width="3.5" stroke-linecap="round"/>
+          </svg>
+          <span class="bl-l2">Evolution</span>
+        </div>
+        <span class="brand-sub">Admin · Sucursal Principal</span>
+      </div>
+    </div>
+    <div class="top-right">
+      <div class="user-pill">
+        <div class="avatar" id="userAvatar">AD</div>
+        <div class="user-info">
+          <strong id="userName">Administrador</strong>
+          <span id="userRole">admin</span>
+        </div>
+      </div>
+      <button class="btn-ghost" id="btnLogout">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <!-- POS View -->
+  <section id="posView" class="pos-shell" style="display:none;">
+    <!-- Header Strip -->
+    <div class="pos-topstrip">
+      <div class="pos-topstrip-left">
+        <img class="pos-strip-logo" data-ic="logo-light" alt="POSsystem Evolution" />
+        <span class="pos-topbar-sep">|</span>
+        <span class="muted">Estación:</span>
+        <b>CAJA-01</b>
+        <span class="pos-topbar-sep">|</span>
+        <span class="muted">Cajero:</span>
+        <b id="posCashierName">BIGWISE</b>
+        <span class="pos-topbar-sep">|</span>
+        <span class="muted">Sucursal:</span>
+        <b>Principal</b>
+      </div>
+      <div class="pos-topstrip-right">
+        <button class="pos-strip-btn" id="openDashboardBtn" title="Ir al panel administrativo">
+          <span class="strip-icon"><img class="ic" data-ic="panel" alt="" /></span> Panel Admin
+        </button>
+        <button class="pos-strip-btn" id="btnSwitchUser" title="Cambiar de usuario">
+          <span class="strip-icon"><img class="ic" data-ic="switch" alt="" /></span> Cambiar usuario
+        </button>
+        <button class="pos-strip-btn" id="btnPosLogout" title="Salir del sistema">
+          <span class="strip-icon"><img class="ic" data-ic="power" alt="" /></span> Salir
+        </button>
+      </div>
+    </div>
+
+    <!-- Main POS grid -->
+    <div class="pos-main">
+      <!-- Customer/Receipt header -->
+      <div class="pos-receipt-head">
+        <div class="pos-receipt-customer">
+          <div class="brand-badge">
+            <img class="ic-brand" data-ic="logo" alt="POSsystem Evolution" />
+          </div>
+          <div class="customer-fields">
+            <div class="cf-row"><span>Código Cliente:</span><b id="rcptCustomerCode">99999999999</b></div>
+            <div class="cf-row"><span>Nombre Cliente:</span><b id="rcptCustomerName">Consumidor Final</b></div>
+            <div class="cf-row"><span>Dirección Cliente:</span><b id="rcptCustomerAddr">Av. 5, Calle 4</b></div>
+            <div class="cf-row saldo-row">
+              <span>Saldo:</span><b id="rcptSaldo">$ 0.00</b>
+              <button class="collect-btn" id="btnCobranza" style="display:none" title="Cobrar deuda del cliente">
+                <img class="ic" data-ic="cxc" alt="" /><span>Cobranza</span>
+              </button>
+            </div>
+            <label class="credito-chk"><input type="checkbox" id="chkCredito" /> Venta a Crédito</label>
+            <div class="util-btn-row">
+              <button class="util-btn" id="btnLastInvoice" title="Ver historial de ventas del día">
+                <img class="ic" data-ic="docs" alt="" /><span>Última Venta</span>
+              </button>
+              <button class="util-btn" id="btnArqueo" title="Arqueo de caja">
+                <img class="ic" data-ic="cashbox" alt="" /><span>Arqueo de Caja</span>
+              </button>
+              <button class="util-btn" id="btnReportZ" title="Reporte Z de cierre del día">
+                <img class="ic" data-ic="reports" alt="" /><span>Reporte Z</span>
+              </button>
+              <button class="util-btn" id="btnChangeRate" title="Cambiar tasa de cambio Bs/USD">
+                <img class="ic" data-ic="refresh" alt="" /><span>Cambiar Tasa</span>
+              </button>
+              <button class="util-btn" id="btnClearCart" title="Vaciar el carrito actual">
+                <img class="ic" data-ic="reset" alt="" /><span>Vaciar Carrito</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="pos-receipt-number">
+          <span>Recibo N°</span>
+          <b id="rcptNumber">01000034</b>
+        </div>
+        <div class="pos-totals">
+          <div class="tot-rate">Tasa: <b id="totUsdRate">36.00</b> Bs/USD</div>
+          <div class="tot-row">
+            <span>Subtotal</span>
+            <div class="tot-vals">
+              <b id="totSubtotal">$0.00</b>
+              <small id="totSubtotalBs">Bs. 0,00</small>
+            </div>
+          </div>
+          <div class="tot-row">
+            <span>I.V.A.</span>
+            <div class="tot-vals">
+              <b id="totTax">$0.00</b>
+              <small id="totTaxBs">Bs. 0,00</small>
+            </div>
+          </div>
+          <div class="tot-row tot-total">
+            <span>Total</span>
+            <div class="tot-vals">
+              <b id="totTotal">$0.00</b>
+              <small id="totTotalBs">Bs. 0,00</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Items table -->
+      <div class="pos-table-wrap">
+        <table class="pos-table">
+          <thead>
+            <tr>
+              <th style="width:50px;">N.°</th>
+              <th style="width:130px;">CÓDIGO</th>
+              <th>DESCRIPCIÓN</th>
+              <th style="width:80px;">CANT.</th>
+              <th style="width:110px;">PRECIO</th>
+              <th style="width:120px;">SUBTOTAL</th>
+              <th style="width:80px;">OFERTA</th>
+            </tr>
+          </thead>
+          <tbody id="posItemsBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Toolbar de acciones -->
+      <div class="toolbar">
+        <button class="tool-btn" data-fn="search"><img class="ic" data-ic="pos-search" alt="" /><span>F2 Buscar</span></button>
+        <button class="tool-btn" data-fn="link"><img class="ic" data-ic="pos-link" alt="" /><span>F3 Vincular</span></button>
+        <button class="tool-btn" data-fn="quantity"><img class="ic" data-ic="pos-qty" alt="" /><span>F4 Cantidad</span></button>
+        <button class="tool-btn" data-fn="scale"><img class="ic" data-ic="pos-scale" alt="" /><span>F5 Balanza</span></button>
+        <button class="tool-btn" data-fn="return"><img class="ic" data-ic="pos-return" alt="" /><span>F6 Devolución</span></button>
+        <button class="tool-btn" data-fn="pending"><img class="ic" data-ic="pos-pending" alt="" /><span>F7 Pendiente</span></button>
+        <button class="tool-btn primary" data-fn="checkout"><img class="ic" data-ic="pos-checkout" alt="" /><span>F8 Cobrar</span></button>
+        <button class="tool-btn" data-fn="suspend"><img class="ic" data-ic="pos-suspend" alt="" /><span>F9 Suspender</span></button>
+        <button class="tool-btn" data-fn="refund"><img class="ic" data-ic="pos-refund" alt="" /><span>F10 Reembolso</span></button>
+        <button class="tool-btn" data-fn="prices"><img class="ic" data-ic="pos-prices" alt="" /><span>F11 Precios</span></button>
+        <button class="tool-btn" data-fn="customers"><img class="ic" data-ic="pos-customers" alt="" /><span>F12 Clientes</span></button>
+        <button class="tool-btn" data-fn="next"><img class="ic" data-ic="pos-next" alt="" /><span>Siguiente</span></button>
+      </div>
+
+      <!-- Status bar -->
+      <div class="pos-statusbar">
+        <span>Cajero: <b id="statusCashier">BIGWISE</b></span>
+        <span>Versión 1.20.13</span>
+        <span>NUM</span>
+        <span id="statusDate">11/18/2015</span>
+        <span id="statusTime">10:47 PM</span>
+        <span class="statusbar-spacer"></span>
+        <span class="statusbar-shortcuts">Atajos: F2 Buscar · F3 Vincular · F4 Cantidad · F8 Cobrar · F9 Suspender · F12 Clientes</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD View -->
+  <section id="dashboardView" class="dash-shell" style="display:none;">
+    <nav class="admin-toolbar" id="dashToolbar">
+      <button class="nav-item tool-item active" data-view="overview"><img class="ic" data-ic="am-overview" alt="" /><span>Resumen</span></button>
+      <button class="nav-item tool-item" data-view="pos"><img class="ic" data-ic="am-pos" alt="" /><span>Punto de Venta</span></button>
+      <button class="nav-item tool-item" data-view="purchases"><img class="ic" data-ic="am-compras" alt="" /><span>Compras</span></button>
+      <button class="nav-item tool-item" data-view="inventory"><img class="ic" data-ic="am-inventario" alt="" /><span>Inventario</span></button>
+      <button class="nav-item tool-item" data-view="sales"><img class="ic" data-ic="am-ventas" alt="" /><span>Ventas</span></button>
+      <button class="nav-item tool-item" data-view="cxc"><img class="ic" data-ic="am-cxc" alt="" /><span>C. por Cobrar</span></button>
+      <button class="nav-item tool-item" data-view="cxp"><img class="ic" data-ic="am-cxp" alt="" /><span>C. por Pagar</span></button>
+      <button class="nav-item tool-item" data-view="clients"><img class="ic" data-ic="am-clientes" alt="" /><span>Clientes</span></button>
+      <button class="nav-item tool-item" data-view="suppliers"><img class="ic" data-ic="am-proveedores" alt="" /><span>Proveedores</span></button>
+      <button class="nav-item tool-item" data-view="accounting"><img class="ic" data-ic="am-contabilidad" alt="" /><span>Contabilidad</span></button>
+      <button class="nav-item tool-item" data-view="cashbox"><img class="ic" data-ic="am-caja" alt="" /><span>Caja / Bancos</span></button>
+      <button class="nav-item tool-item" data-view="reports"><img class="ic" data-ic="am-reportes" alt="" /><span>Reportes</span></button>
+      <button class="nav-item tool-item" data-view="users"><img class="ic" data-ic="am-usuarios" alt="" /><span>Usuarios</span></button>
+      <button class="nav-item tool-item" data-view="settings"><img class="ic" data-ic="am-config" alt="" /><span>Configuración</span></button>
+    </nav>
+
+    <main class="dash-main">
+      <div class="dash-page-title">
+        <h2 id="dashPageTitle">Resumen</h2>
+        <div class="dash-breadcrumb"><span>Escritorio</span> <i>›</i> <b id="dashPageCrumb">Resumen</b></div>
+      </div>
+
+      <!-- VIEWS GO HERE -->
+      <div id="dashContent" class="dash-content"></div>
+    </main>
+  </section>
+</div>
+
+<!-- Modal genérico -->
+<div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+  <div class="modal-card" id="modalCard">
+    <div class="modal-head">
+      <div class="modal-icon" id="modalIcon"><img class="ic" data-ic="bolt" alt="" /></div>
+      <div class="modal-title-wrap"><h3 id="modalTitle">Título</h3></div>
+      <button class="modal-close" id="modalClose" title="Cerrar"><img class="ic" data-ic="close" alt="Cerrar" /></button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- Iframe oculto para imprimir tickets (impresora térmica 80mm) -->
+<iframe id="printFrame" name="printFrame" style="display:none" title="Impresión de tickets"></iframe>
+
+<script src="js/data.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/app.js"></script>
+<script src="js/pos.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/modules.js"></script>
+</body>
+</html>

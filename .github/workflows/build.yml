@@ -1,0 +1,39 @@
+name: Build Windows (.exe)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar dependencias nativas para Electron
+        run: npx electron-builder install-app-deps
+
+      - name: Generar instalador .exe (NSIS)
+        run: npx electron-builder --win nsis --x64
+        env:
+          # El build no firma; deshabilitamos publicación automática
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Subir instalador como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: POSsystem-Evolution-setup
+          path: dist/*.exe
+          if-no-files-found: error

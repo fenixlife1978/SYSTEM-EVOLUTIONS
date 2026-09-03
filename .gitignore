@@ -1,0 +1,22 @@
+node_modules/
+dist/
+release/
+build/
+out/
+
+# Base de datos local
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Entorno local (rutas absolutas de salida de CI)
+.env
