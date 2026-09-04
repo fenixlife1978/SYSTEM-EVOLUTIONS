@@ -178,6 +178,8 @@ function bindCustomerWidgets() {
   if (cob) cob.addEventListener('click', posCollect);
   const last = $('#btnLastInvoice');
   if (last) last.addEventListener('click', posDaySales);
+  const pend = $('#btnPending');
+  if (pend) pend.addEventListener('click', posPendingList);
   const arq = $('#btnArqueo');
   if (arq) arq.addEventListener('click', posArqueo);
   const z = $('#btnReportZ');
@@ -394,21 +396,86 @@ function posReturn() {
 /* F7 — Ticket pendiente (guardar sin cobrar) */
 function posPending() {
   if (ticket.items.length === 0) { toast('El ticket está vacío', 'warn'); return; }
-  const pending = JSON.parse(localStorage.getItem('possystem_pending') || '[]');
+  const pending = loadPending();
+  const sub = ticket.items.reduce((s, i) => s + i.qty * i.price, 0);
   pending.push({
     id: Date.now(),
-    date: new Date().toISOString(),
+    date: veStamp(),
+    number: ticket.number,
     items: JSON.parse(JSON.stringify(ticket.items)),
-    customer: ticket.customer
+    customer: ticket.customer,
+    total: sub
   });
-  localStorage.setItem('possystem_pending', JSON.stringify(pending));
-  toast('Ticket guardado como pendiente', 'success');
+  savePending(pending);
+  toast('Ticket guardado como pendiente/suspendido', 'success');
   resetTicket();
 }
 
 function loadPending() {
-  return JSON.parse(localStorage.getItem('possystem_pending') || '[]');
+  try { return JSON.parse(localStorage.getItem('possystem_pending') || '[]'); }
+  catch (e) { return []; }
 }
+function savePending(list) {
+  localStorage.setItem('possystem_pending', JSON.stringify(list));
+}
+
+/* Retoma una venta pendiente/suspendida (carga items, cliente y número). */
+function resumePending(id) {
+  const list = loadPending();
+  const idx = list.findIndex(x => x.id === id);
+  if (idx < 0) { toast('El pendiente ya no existe', 'warn'); return; }
+  const p = list[idx];
+  if (ticket.items.length > 0) { if (!confirm('Hay un ticket en curso. ¿Reemplazarlo por el pendiente?')) return; }
+  ticket.items = JSON.parse(JSON.stringify(p.items));
+  const cli = db.clients.find(c => c.name === p.customer.name) || db.clients[0];
+  ticket.customer = cli;
+  if (p.number) ticket.number = p.number;
+  $('#rcptCustomerCode').textContent = cli.code;
+  $('#rcptCustomerName').textContent = cli.name;
+  $('#rcptCustomerAddr').textContent = cli.address || '';
+  $('#rcptNumber').textContent = ticket.number;
+  list.splice(idx, 1);
+  savePending(list);
+  renderCustomerInfo();
+  renderTicketTable();
+  closeModal();
+  toast('Venta pendiente retomada', 'success');
+  setTimeout(focusCodeInput, 60);
+}
+
+/* Lista los tickets pendientes/suspendidos para retomarlos o eliminarlos. */
+function posPendingList() {
+  const pending = loadPending();
+  const body = pending.length === 0
+    ? '<div class="dt empty">No hay ventas pendientes/suspendidas</div>'
+    : `<table class="dt" style="width:100%"><thead><tr><th>Fecha</th><th>N°</th><th>Cliente</th><th class="num">Productos</th><th class="num">Total</th><th></th></tr></thead><tbody>
+        ${pending.map(p => `
+          <tr>
+            <td>${p.date}</td>
+            <td><code>${p.number || '—'}</code></td>
+            <td>${p.customer ? p.customer.name : '—'}</td>
+            <td class="num">${(p.items || []).reduce((s, i) => s + i.qty, 0)}</td>
+            <td class="num">${fmt.money(p.total || 0)}</td>
+            <td class="actions-cell">
+              <button class="btn sm primary" data-resume="${p.id}">Retomar</button>
+              <button class="btn sm danger" data-ppdel="${p.id}">${ico('close')}</button>
+            </td>
+          </tr>`).join('')}
+      </tbody></table>`;
+  const footer = `<button class="btn" onclick="closeModal()">Cerrar</button>`;
+  openModal({ title: 'Ventas pendientes / suspendidas (F7 · F9)', body: body, footer, size: 'modal-lg' });
+  setTimeout(() => {
+    $$('button[data-resume]').forEach(b => b.addEventListener('click', () => resumePending(+b.dataset.resume)));
+    $$('button[data-ppdel]').forEach(b => b.addEventListener('click', () => {
+      if (!confirm('¿Eliminar este pendiente?')) return;
+      const list = loadPending().filter(x => x.id !== +b.dataset.ppdel);
+      savePending(list);
+      posPendingList();
+      toast('Pendiente eliminado', 'warn');
+    }));
+  }, 60);
+}
+
 
 /* F8 — Cobrar */
 function getReceiptLines() {
