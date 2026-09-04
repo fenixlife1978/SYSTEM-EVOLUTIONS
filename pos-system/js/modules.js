@@ -771,7 +771,10 @@ function productForm(id) {
       box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('change', () => {
         const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return;
         r.precio = pnum(el.value);
-        const c = cost(); if (c > 0) { const eqIn = el.closest('div').querySelector('.pr-eq'); const e = eqIn ? (pnum(eqIn.value) || 1) : contenido(); setGain((((r.precio / e) - c) / c) * 100); paintRows(); }
+        // Solo la presentación base recalcula el % de Ganancia; las fraccionadas manuales son independientes
+        if (r.base) {
+          const c = cost(); if (c > 0) { const eqIn = el.closest('div').querySelector('.pr-eq'); const e = eqIn ? (pnum(eqIn.value) || 1) : contenido(); setGain((((r.precio / e) - c) / c) * 100); paintRows(); }
+        }
       }));
       box.querySelectorAll('.pr-tp').forEach(el => el.addEventListener('change', () => {
         const r = rows[+el.dataset.i]; r.tipo = el.value;

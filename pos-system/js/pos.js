@@ -1255,39 +1255,43 @@ function fmtNumStock(n) { const v = Number(n) || 0; return Number.isInteger(v) ?
 
 /* Pedir cantidad y agregar la presentación canónica elegida (permite decimales si es por peso) */
 function openQtyCanonical(p, view) {
-  const weighed = !!p.weighed;
-  const step = weighed ? '0.001' : '1';
-  const min = weighed ? 0 : 1;
+  const price = view.precio || 0;
+  const rate = fmt.usdRate() || 36;
+  const fmtv = (v) => { const x = Number(v) || 0; if (x === 0) return '0'; return String(parseFloat(x.toFixed(8))); };
+  const qv = (el) => parseFloat(String(el.value).replace(',', '.')) || 0;
   const html = `
     <div class="form-grid">
       <div class="field span-2"><label>Producto</label><input value="${p.name}" disabled style="background:#f3f4f6" /></div>
-      <div class="field"><label>Presentación</label><input value="${view.unidad} · ${fmt.moneyDyn(view.precio)}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Presentación</label><input value="${view.unidad}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Precio / unid. de venta</label><input value="${fmt.moneyDyn(price)}" disabled style="background:#f3f4f6" /></div>
       <div class="field"><label>Cantidad</label><input type="text" inputmode="decimal" id="qcQty" value="1" autofocus /></div>
+      <div class="field"><label>Subtotal (USD)</label><input type="text" inputmode="decimal" id="qcUsd" value="${fmtv(price)}" /></div>
+      <div class="field"><label>Equiv. Bs</label><input type="text" inputmode="decimal" id="qcBs" value="${fmtv(price * rate)}" /></div>
     </div>
-    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:8px">
-      <div style="font-size:11px;color:#6b7280">Subtotal</div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <b id="qcSub" style="font-size:22px;color:#15803d;font-family:Consolas,monospace">${fmt.moneyDyn(view.precio)}</b>
-        <span id="qcConsume" style="font-size:11px;color:#6b7280"></span>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:8px">
+      <span style="font-size:11px;color:#166534" id="qcRate">Tasa: ${fmt.num(rate)} Bs/USD</span>
+      <span id="qcConsume" style="font-size:11px;color:#6b7280"></span>
     </div>`;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="qcOk">${ico('check')} Agregar al ticket</button>`;
   openModal({ title: 'Vender — ' + p.name, body: html, footer });
   setTimeout(() => {
-    const inp = $('#qcQty'); inp.focus(); inp.select();
-    const calc = () => {
-      const q = parseFloat(String(inp.value).replace(',', '.')) || 0;
-      const subtotal = q * (view.precio || 0);
-      const consume = q * (view.equiv || 1);
-      $('#qcSub').textContent = fmt.moneyDyn(subtotal);
-      $('#qcConsume').textContent = 'Descuenta ' + fmtNumStock(consume) + ' ' + unitAbbr(invBaseUnit(p), consume);
-      return { q, consume };
+    const qEl = $('#qcQty'), uEl = $('#qcUsd'), bEl = $('#qcBs'), consEl = $('#qcConsume');
+    const setConsume = (q) => { const cons = q * (view.equiv || 1); consEl.textContent = 'Descuenta ' + fmtNumStock(cons) + ' ' + unitAbbr(invBaseUnit(p), cons) + ' del stock'; };
+    const recalc = (src) => {
+      let q, u, b;
+      if (src === 'qty') { q = qv(qEl); u = q * price; b = u * rate; uEl.value = fmtv(u); bEl.value = fmtv(b); }
+      else if (src === 'usd') { u = qv(uEl); b = u * rate; bEl.value = fmtv(b); q = price > 0 ? u / price : 0; qEl.value = fmtv(q); }
+      else { b = qv(bEl); u = rate > 0 ? b / rate : 0; uEl.value = fmtv(u); q = price > 0 ? u / price : 0; qEl.value = fmtv(q); }
+      setConsume(q);
     };
-    inp.addEventListener('input', calc);
-    calc();
+    qEl.addEventListener('input', () => recalc('qty'));
+    uEl.addEventListener('input', () => recalc('usd'));
+    bEl.addEventListener('input', () => recalc('bs'));
+    recalc('qty');
     $('#qcOk').addEventListener('click', () => {
-      const { q, consume } = calc();
+      const q = qv(qEl);
+      const consume = q * (view.equiv || 1);
       if (q <= 0) { toast('Indique una cantidad mayor que cero', 'warn'); return; }
       const chk = validateStock(p, view.equiv || 1, q);
       if (!chk.ok) { toast(chk.message, 'warn', 3200); return; }
