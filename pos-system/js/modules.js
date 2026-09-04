@@ -114,7 +114,7 @@ function purchaseForm() {
   };
   const html = `
     <div class="form-grid">
-      <div class="field"><label>Fecha</label><input type="date" id="pfDate" value="${new Date().toISOString().slice(0,10)}" /></div>
+      <div class="field"><label>Fecha</label><input type="date" id="pfDate" value="${veDate()}" /></div>
       <div class="field"><label>Proveedor</label>
         <select id="pfSupplier">${db.suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
       </div>
@@ -787,7 +787,7 @@ function paintCxC() {
 function cxcForm() {
   const html = `
     <div class="form-grid">
-      <div class="field"><label>Fecha</label><input type="date" id="cxcDate" value="${new Date().toISOString().slice(0,10)}" /></div>
+      <div class="field"><label>Fecha</label><input type="date" id="cxcDate" value="${veDate()}" /></div>
       <div class="field"><label>Tipo</label><select id="cxcType"><option>FAC</option><option>NCR</option><option>ND</option></select></div>
       <div class="field span-2"><label>Cliente</label><select id="cxcClient">${db.clients.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('')}</select></div>
       <div class="field"><label>N° Documento</label><input id="cxcNum" value="F-2025-${String(Math.floor(Math.random()*999)).padStart(3,'0')}" /></div>
@@ -825,7 +825,7 @@ function paymentForm(id) {
       <select id="payDoc">${db.receivables.filter(x => x.status !== 'paid').map(x => `<option value="${x.id}" ${r && x.id === r.id ? 'selected' : ''}>${x.docNumber} — ${x.client} — saldo ${fmt.money(x.balance)}</option>`).join('')}</select>
     </div>
     <div class="field"><label>Monto a pagar</label><input type="number" step="0.01" id="payAmt" value="${r ? r.balance.toFixed(2) : 0}" /></div>
-    <div class="field"><label>Fecha</label><input type="date" id="payDate" value="${new Date().toISOString().slice(0,10)}" /></div>
+    <div class="field"><label>Fecha</label><input type="date" id="payDate" value="${veDate()}" /></div>
     <div class="field"><label>Forma de pago</label>
       <select id="payForm"><option>Efectivo</option><option>Transferencia</option><option>Cheque</option><option>Tarjeta</option></select>
     </div>
@@ -926,7 +926,7 @@ function paintCxP() {
 function cxpForm() {
   const html = `
     <div class="form-grid">
-      <div class="field"><label>Fecha</label><input type="date" id="pDate" value="${new Date().toISOString().slice(0,10)}" /></div>
+      <div class="field"><label>Fecha</label><input type="date" id="pDate" value="${veDate()}" /></div>
       <div class="field"><label>Tipo</label><select id="pType"><option>FAC</option><option>NDB</option><option>NCR</option></select></div>
       <div class="field span-2"><label>Proveedor</label><select id="pSup">${db.suppliers.map(s => `<option value="${s.id}">${s.name} (${s.code})</option>`).join('')}</select></div>
       <div class="field"><label>N° Documento</label><input id="pNum" value="P-2025-${String(Math.floor(Math.random()*999)).padStart(3,'0')}" /></div>
@@ -964,7 +964,7 @@ function supplierPaymentForm(id) {
       <select id="sppDoc">${db.payables.filter(x => x.status !== 'paid').map(x => `<option value="${x.id}" ${p && x.id === p.id ? 'selected' : ''}>${x.docNumber} — ${x.supplier} — saldo ${fmt.money(x.balance)}</option>`).join('')}</select>
     </div>
     <div class="field"><label>Monto a pagar</label><input type="number" step="0.01" id="sppAmt" value="${p ? p.balance.toFixed(2) : 0}" /></div>
-    <div class="field"><label>Fecha</label><input type="date" id="sppDate" value="${new Date().toISOString().slice(0,10)}" /></div>
+    <div class="field"><label>Fecha</label><input type="date" id="sppDate" value="${veDate()}" /></div>
     <div class="field"><label>Forma de pago</label>
       <select id="sppForm"><option>Transferencia</option><option>Efectivo</option><option>Cheque</option></select>
     </div>
@@ -1095,7 +1095,7 @@ function clientForm(id) {
         status: c.status || 'active'
       };
       if (id) Object.assign(c, data);
-      else db.clients.push({ id: Date.now(), createdAt: new Date().toISOString().slice(0, 10), ...data });
+      else db.clients.push({ id: Date.now(), createdAt: veDate(), ...data });
       DB.save(db); closeModal(); renderClients();
       toast('Cliente guardado', 'success');
     });
@@ -1349,7 +1349,7 @@ function accountingForm() {
   const catsE = ['Compras', 'Nómina', 'Servicios', 'Proveedores', 'Gastos administrativos', 'Impuestos', 'Otros egresos'];
   const html = `
     <div class="form-grid">
-      <div class="field"><label>Fecha</label><input type="date" id="mvDate" value="${new Date().toISOString().slice(0,10)}" /></div>
+      <div class="field"><label>Fecha</label><input type="date" id="mvDate" value="${veDate()}" /></div>
       <div class="field"><label>Tipo</label>
         <select id="mvType"><option value="ingreso">Ingreso</option><option value="egreso">Egreso</option></select>
       </div>
@@ -1430,7 +1430,7 @@ function renderCashbox() {
 function cashForm() {
   const html = `
     <div class="form-grid">
-      <div class="field"><label>Fecha</label><input type="date" id="cbDate" value="${new Date().toISOString().slice(0,10)}" /></div>
+      <div class="field"><label>Fecha</label><input type="date" id="cbDate" value="${veDate()}" /></div>
       <div class="field"><label>Tipo</label>
         <select id="cbType"><option value="apertura">Apertura</option><option value="retiro">Retiro</option><option value="ingreso">Ingreso</option><option value="cierre">Cierre</option></select>
       </div>
@@ -1446,7 +1446,7 @@ function cashForm() {
     $('#cbSave').addEventListener('click', () => {
       const c = {
         id: db.cashbox.length + 1,
-        date: $('#cbDate').value + ' ' + new Date().toTimeString().slice(0,5),
+        date: $('#cbDate').value + ' ' + veTime(),
         type: $('#cbType').value,
         description: $('#cbDesc').value,
         amount: parseFloat($('#cbAmt').value) || 0,
@@ -1874,7 +1874,7 @@ function renderSettings() {
         const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'possystem-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+        a.download = 'possystem-backup-' + veDate() + '.json';
         a.click();
         toast('Respaldo descargado', 'success');
       });

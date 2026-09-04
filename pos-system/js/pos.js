@@ -422,7 +422,7 @@ function getReceiptLines() {
   lns.push(padc(c.website));
   lns.push('');
   lns.push(padlr('Recibo:', ticket.number));
-  lns.push(padlr('Fecha:', new Date().toLocaleString('es-VE')));
+  lns.push(padlr('Fecha:', veStamp()));
   lns.push(padlr('Cliente:', ticket.customer.name + ' (' + ticket.customer.code + ')'));
   lns.push('');
   lns.push(sep);
@@ -574,7 +574,8 @@ function finalizeSale(total, base, tax, payData) {
   // Registrar venta
   const sale = {
     id: db.sales.length + 1,
-    date: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    date: veStamp(),
+    rate: fmt.usdRate(),
     client: ticket.customer.name,
     number: ticket.number,
     items: ticket.items.length,
@@ -604,7 +605,7 @@ function finalizeSale(total, base, tax, payData) {
     const due = new Date(); due.setDate(due.getDate() + 30);
     db.receivables.unshift({
       id: db.receivables.length + 1,
-      date: new Date().toISOString().slice(0, 10),
+      date: veDate(),
       client: ticket.customer.name,
       docType: 'FAC',
       docNumber: ticket.number,
@@ -620,7 +621,7 @@ function finalizeSale(total, base, tax, payData) {
   // Ingreso contable
   db.accounting.unshift({
     id: db.accounting.length + 1,
-    date: new Date().toISOString().slice(0, 10),
+    date: veDate(),
     type: 'ingreso',
     category: 'Ventas',
     description: `Venta ${ticket.number} — ${ticket.customer.name}`,
@@ -694,7 +695,7 @@ function posCollect() {
       }
       db.accounting.unshift({
         id: db.accounting.length + 1,
-        date: new Date().toISOString().slice(0, 10),
+        date: veDate(),
         type: 'ingreso', category: 'Cobranza',
         description: 'Cobro POS a ' + c.name + ' · ' + METHOD_LBL(met),
         amount: amt, ref: 'COB-' + Date.now().toString().slice(-5)
@@ -761,10 +762,7 @@ function posDaySales() {
   }, 60);
 }
 
-function posDateStr(d) {
-  d = d || new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
+function posDateStr(d) { return veDate(d || new Date()); }
 
 /* Cambiar tasa de cambio Bs/USD */
 function posChangeRate() {
@@ -954,7 +952,7 @@ function posArqueo() {
       const resumen = 'Bs: ' + signDif(sn.dBs) + ' Bs. ' + fmtNum(sn.dBs) + ' · USD: ' + signDif(sn.dUsd) + ' ' + fmt.money(sn.dUsd);
       db.cashbox.unshift({
         id: db.cashbox.length + 1,
-        date: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        date: veStamp(),
         type: 'arqueo',
         description: 'Arqueo de caja · ' + resumen,
         amount: sn.r.efectivoUsd || 0,
@@ -1056,19 +1054,44 @@ function posLastDetail(id) {
   if (!s) return;
   const cli = db.clients.find(c => c.name === s.client);
   const statePill = s.status === 'credit' ? '<span class="pill yellow">Crédito</span>' : s.status === 'refunded' ? '<span class="pill red">Reembolsada</span>' : '<span class="pill green">Pagada</span>';
+  const rate = Number(s.rate) || fmt.usdRate();
+  const linesArr = Array.isArray(s.lines) ? s.lines : [];
+  const itemsHtml = linesArr.length
+    ? `<table class="dt" style="width:100%"><thead><tr><th>Producto</th><th>UM</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Subtotal</th></tr></thead><tbody>
+        ${linesArr.map(l => `<tr>
+          <td>${l.name}</td>
+          <td>${unitAbbr(l.present || l.base || 'Und', l.qty)}</td>
+          <td class="num">${fmtNumStock(l.qty)}</td>
+          <td class="num">${fmt.frac(l.price)}</td>
+          <td class="num">${fmt.money((l.qty * l.price))}</td></tr>`).join('')}
+       </tbody></table>`
+    : '<div class="dt empty">Sin detalle de items</div>';
+  const pays = Array.isArray(s.payments) && s.payments.length ? s.payments : null;
+  const paysHtml = pays
+    ? `<table class="dt" style="width:100%"><thead><tr><th>Método</th><th class="num">Monto (${pays[0].cur || 'USD'})</th><th class="num">Equiv. USD</th></tr></thead><tbody>
+        ${pays.map(p => `<tr><td>${METHOD_LBL(p.method)}</td><td class="num">${p.cur === 'BS' ? 'Bs. ' + fmt.num(p.amount) : fmt.money(p.amount)}</td><td class="num">${fmt.money(p.usd)}</td></tr>`).join('')}
+       </tbody></table>`
+    : `<p style="color:#6b7280;font-size:13px">Método: <b>${METHOD_LBL(s.method)}</b></p>`;
+  const changeTxt = s.changeUSD > 0 ? `<div style="font-size:12px;color:#b45309;margin-top:4px">Vuelto entregado: ${fmt.money(s.changeUSD)}</div>` : '';
   const html = `
-    <div class="form-grid" style="margin-bottom:14px">
+    <div class="form-grid" style="margin-bottom:12px">
       <div class="field"><label>Recibo N°</label><input value="${s.number}" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
-      <div class="field"><label>Fecha</label><input value="${s.date}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Fecha (Venezuela)</label><input value="${s.date}" disabled style="background:#f3f4f6" /></div>
       <div class="field"><label>Cliente</label><input value="${s.client}" disabled style="background:#f3f4f6" /></div>
       <div class="field"><label>RIF / CI</label><input value="${cli ? cli.taxId : ''}" disabled style="background:#f3f4f6" /></div>
-      <div class="field"><label>N.° de productos</label><input value="${s.items}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Tasa BCV utilizada</label><input value="${fmt.num(rate)} Bs/USD" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
       <div class="field"><label>Estado</label><input value="${s.status}" disabled style="background:#f3f4f6" /></div>
     </div>
-    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;text-align:center">
-      <div style="font-size:12px;color:#166534">Total</div>
+    <b style="font-size:12px;color:#1f2937">Items vendidos (${linesArr.length})</b>
+    <div style="max-height:180px;overflow:auto;margin:6px 0 12px;border:1px solid #e2e6ec;border-radius:8px">${itemsHtml}</div>
+    <b style="font-size:12px;color:#1f2937">Pago</b>
+    <div style="margin:6px 0 12px">${paysHtml}</div>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;text-align:center">
+      <div style="font-size:12px;color:#166534">Total cobrado</div>
       <div style="font-size:28px;font-weight:800;color:#15803d">${fmt.money(s.total)}</div>
+      <div style="font-size:12px;color:#166534">Bs. ${fmt.num(s.total * rate)}</div>
       <div style="margin-top:6px">${statePill}</div>
+      ${changeTxt}
     </div>`;
   const footer = `
     <button class="btn" onclick="closeModal()">Volver</button>
@@ -1148,7 +1171,7 @@ function openCashOpening() {
       // Registrar apertura en caja (fondo en USD como monto)
       db.cashbox.unshift({
         id: db.cashbox.length + 1,
-        date: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        date: veStamp(),
         type: 'apertura',
         description: 'Apertura de caja · Bs ' + (fondoBs || '0') + ' / USD ' + (fondoUsd || '0'),
         amount: parseFloat(fondoUsd) || 0,
@@ -1193,7 +1216,7 @@ function posRefund() {
       if (!s) return;
       db.accounting.unshift({
         id: db.accounting.length + 1,
-        date: new Date().toISOString().slice(0, 10),
+        date: veDate(),
         type: 'egreso', category: 'Devoluciones',
         description: `Reembolso ${s.number}`, amount: s.total, ref: 'R-' + s.number
       });

@@ -40,7 +40,7 @@ function bindLogin() {
     }
     session.user = user;
     session.role = user.role;
-    user.lastLogin = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    user.lastLogin = veStamp();
     DB.save(db);
     showApp();
   });
@@ -90,23 +90,19 @@ function showDashboard(initialView) {
   renderDashboard(initialView || 'overview');
 }
 
-/* ---------- Reloj y fecha del statusbar del POS ---------- */
+/* ---------- Reloj y fecha del statusbar del POS (hora de Venezuela) ---------- */
 function updateClock() {
-  const d = new Date();
-  const hh = d.getHours() % 12 || 12;
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-  const t = `${hh}:${mm} ${ampm}`;
+  const p = veParts();
+  const h24 = Number(p.hour) || 0;
+  const hh = h24 % 12 || 12;
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
   const el = $('#statusTime');
-  if (el) el.textContent = t;
+  if (el) el.textContent = `${hh}:${p.minute} ${ampm}`;
 }
 function updateDate() {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const y = d.getFullYear();
+  const p = veParts();
   const el = $('#statusDate');
-  if (el) el.textContent = `${m}/${day}/${y}`;
+  if (el) el.textContent = `${p.month}/${p.day}/${p.year}`;
 }
 
 /* ---------- Globales ---------- */

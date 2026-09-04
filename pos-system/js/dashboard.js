@@ -42,7 +42,7 @@ document.addEventListener('click', (e) => {
    OVERVIEW / Resumen
    ============================================================ */
 function renderOverview() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = veDate();
   const todaySales = db.sales.filter(s => s.date.startsWith(today.replace(/-/g, '/')));
   const todayTotal = todaySales.reduce((s, x) => s + x.total, 0);
   const monthSales = db.sales.filter(s => s.date.startsWith(today.slice(0, 7)));

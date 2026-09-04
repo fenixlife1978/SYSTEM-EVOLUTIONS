@@ -165,3 +165,33 @@ const fmt = {
     return dt.toLocaleDateString('es-VE', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
   }
 };
+
+/* ---------- Fecha / hora local de Venezuela (UTC-4) ---------- */
+const VE_TZ = 'America/Caracas';
+function veParts(t) {
+  t = t || new Date();
+  try {
+    const f = new Intl.DateTimeFormat('en-CA', { timeZone: VE_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    const o = {};
+    f.formatToParts(t).forEach(x => { if (x.type !== 'literal') o[x.type] = x.value; });
+    return o;
+  } catch (e) {
+    const d = new Date(t);
+    const p = (n) => String(n).padStart(2, '0');
+    return { year: String(d.getFullYear()), month: p(d.getMonth() + 1), day: p(d.getDate()), hour: p(d.getHours()), minute: p(d.getMinutes()), second: p(d.getSeconds()) };
+  }
+}
+function veDate(t) { const o = veParts(t); return o.year + '-' + o.month + '-' + o.day; }
+function veTime(t) { const o = veParts(t); return o.hour + ':' + o.minute; }
+function veStamp(t) { return veDate(t) + ' ' + veTime(t); }
+/* Fecha/hora legible en Venezuela (para tickets/reportes). */
+function veLong(t) {
+  t = t || new Date();
+  try { return new Intl.DateTimeFormat('es-VE', { timeZone: VE_TZ, weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).format(t); }
+  catch (e) { return veStamp(t); }
+}
+/* Devuelve un Date con la hora de Venezuela (para cálculos de vencimiento locales). */
+function veNowDate() {
+  const o = veParts();
+  return new Date(o.year, o.month - 1, o.day, o.hour, o.minute, o.second);
+}
