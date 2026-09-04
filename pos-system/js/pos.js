@@ -490,13 +490,13 @@ function posCheckout() {
       </div>
       <div>
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;text-align:center;margin-bottom:12px">
-          <div style="font-size:12px;color:#166534">Total a cobrar</div>
-          <div style="font-size:26px;font-weight:800;color:#15803d">${fmt.money(due)}</div>
-          <div style="font-size:12px;color:#166534">Tasa: ${fmt.num(rate)} Bs/USD</div>
+          <div style="font-size:12px;color:#166534">Total a pagar</div>
+          <div style="font-size:26px;font-weight:800;color:#15803d">${fmt.moneyEsp(due)}</div>
+          <div style="font-size:12px;color:#166534">Tasa: ${fmt.esp(rate)} Bs/USD</div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <div style="border:1px solid #fbbf24;border-radius:8px;padding:8px 10px;background:#fffbeb"><div style="font-size:11px;color:#92400e">Falta por cubrir</div><b id="payFalta" style="color:#92400e">${fmt.money(due)}</b><small id="payFaltaBs" style="display:block;color:#b45309"></small></div>
-          <div style="border:1px solid #a7f3d0;border-radius:8px;padding:8px 10px;background:#ecfdf5"><div style="font-size:11px;color:#047857">Vuelto</div><b id="payVueltoUsd" style="color:#047857">$ 0.00</b><small id="payVueltoBs" style="display:block;color:#047857"></small></div>
+          <div style="border:1px solid #fbbf24;border-radius:8px;padding:8px 10px;background:#fffbeb"><div style="font-size:11px;color:#92400e">Restante</div><b id="payFalta" style="color:#92400e">${fmt.moneyEsp(due)}</b><small id="payFaltaBs" style="display:block;color:#b45309"></small></div>
+          <div style="border:1px solid #a7f3d0;border-radius:8px;padding:8px 10px;background:#ecfdf5"><div style="font-size:11px;color:#047857">Vuelto</div><b id="payVueltoUsd" style="color:#047857">$ 0,00</b><small id="payVueltoBs" style="display:block;color:#047857"></small></div>
         </div>
         <b style="font-size:12px;color:#374151">Métodos de pago</b>
         <div id="payLines" style="margin:6px 0"></div>
@@ -511,55 +511,74 @@ function posCheckout() {
   `;
   openModal({ title: 'F8 — Cobrar', body: html, footer, size: 'modal-lg' });
   setTimeout(() => {
+    const plLines = () => $('#payLines');
+    const paidTotal = () => { let p = 0; pl.forEach(ln => { const m = mi(ln.method); p += usdOf(m.cur, ln.amt || 0); }); return p; };
     const paint = () => {
-      const box = $('#payLines'); if (!box) return;
+      const box = plLines(); if (!box) return;
       box.innerHTML = pl.map((ln, i) => {
         const m = mi(ln.method); const cur = m ? m.cur : 'USD';
-        const txt = (ln.amt == null || ln.amt === 0) ? '' : (cur === 'BS' ? fmtDecLocal(ln.amt) : fmtDecLocal(ln.amt));
-        return `<div style="display:grid;grid-template-columns:1.2fr 1fr 150px 28px;gap:6px;align-items:center;margin-bottom:6px" data-i="${i}">
-          <select class="pl-m">${PAY_METHODS.map(mm => `<option value="${mm.k}" ${mm.k === ln.method ? 'selected' : ''}>${mm.lbl}</option>`).join('')}</select>
-          <input type="text" inputmode="decimal" class="pl-a" value="${txt}" placeholder="${cur === 'BS' ? 'Monto en Bs.' : 'Monto USD'}" />
+        const txt = (ln.amt == null || ln.amt === 0) ? '' : fmt.esp(ln.amt);
+        const curLbl = cur === 'BS' ? 'Bs.' : 'USD';
+        return `<div style="display:grid;grid-template-columns:1.1fr 1fr 76px 150px 28px;gap:6px;align-items:center;margin-bottom:6px" data-i="${i}">
+          <select class="pl-m" title="Método de pago">${PAY_METHODS.map(mm => `<option value="${mm.k}" ${mm.k === ln.method ? 'selected' : ''}>${mm.lbl}</option>`).join('')}</select>
+          <input type="text" inputmode="decimal" class="pl-a" value="${txt}" placeholder="Monto (${curLbl})" title="Monto en ${curLbl}" />
+          <button type="button" class="btn sm pl-rest" title="Completar el saldo restante">Restante</button>
           <span class="pl-usd" style="font-size:11px;color:#15803d"></span>
           <button type="button" class="btn sm danger pl-del" title="Quitar">&times;</button>
         </div>`;
       }).join('');
-      const rows = Array.from(box.querySelectorAll('[data-i]'));
-      rows.forEach(row => {
+      Array.from(box.querySelectorAll('[data-i]')).forEach(row => {
         const i = +row.dataset.i;
         const mSel = row.querySelector('.pl-m'); const aIn = row.querySelector('.pl-a');
         mSel.addEventListener('change', () => { pl[i].method = mSel.value; paint(); });
-        aIn.addEventListener('input', () => { pl[i].amt = pnumC(aIn.value); recalc(); });
+        aIn.addEventListener('input', () => { pl[i].amt = fmt.parseEsp(aIn.value); recalc(); });
+        aIn.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            pl[i].amt = fmt.parseEsp(aIn.value);
+            if (paidTotal() >= due - 0.005) return; // ya cubierto
+            const def = PAY_METHODS.find(mm => mm.cur === 'BS') ? PAY_METHODS.find(mm => mm.cur === 'BS').k : 'efectivoBs';
+            pl.push({ method: def, amt: 0 });
+            paint();
+            const els = plLines().querySelectorAll('.pl-a'); if (els.length) els[els.length - 1].focus();
+          }
+        });
+        row.querySelector('.pl-rest').addEventListener('click', () => {
+          const m = mi(pl[i].method); const cur = m.cur;
+          let paidOthers = 0;
+          pl.forEach((ln, j) => { if (j !== i) { const mm = mi(ln.method); paidOthers += usdOf(mm.cur, ln.amt || 0); } });
+          const rem = Math.max(0, due - paidOthers);
+          pl[i].amt = cur === 'BS' ? rem * rate : rem;
+          const inp = row.querySelector('.pl-a'); inp.value = fmt.esp(pl[i].amt);
+          recalc();
+        });
         row.querySelector('.pl-del').addEventListener('click', () => { pl.splice(i, 1); if (pl.length === 0) pl.push({ method: 'efectivoUsd', amt: 0 }); paint(); recalc(); });
       });
       recalc();
     };
     const recalc = () => {
-      let paid = 0;
-      pl.forEach((ln, i) => { const m = mi(ln.method); const cur = m ? m.cur : 'USD'; const usd = usdOf(cur, ln.amt || 0); paid += usd; pl[i].usd = usd; });
+      const paid = paidTotal();
       const falta = Math.max(0, due - paid);
       const vuelto = Math.max(0, paid - due);
-      $('#payFalta').textContent = fmt.money(falta);
-      $('#payFaltaBs').textContent = 'Bs. ' + fmt.num(falta * rate);
-      $('#payVueltoUsd').textContent = fmt.money(vuelto);
-      $('#payVueltoBs').textContent = 'Bs. ' + fmt.num(vuelto * rate);
-      // etiquetas USD de cada línea
+      $('#payFalta').textContent = fmt.moneyEsp(falta);
+      $('#payFaltaBs').textContent = fmt.bsEsp(falta * rate);
+      $('#payVueltoUsd').textContent = fmt.moneyEsp(vuelto);
+      $('#payVueltoBs').textContent = fmt.bsEsp(vuelto * rate);
       Array.from($('#payLines').querySelectorAll('[data-i]')).forEach(row => {
-        const i = +row.dataset.i; const usd = pl[i].usd || 0;
-        row.querySelector('.pl-usd').textContent = usd > 0 ? ('= USD ' + String(parseFloat(usd.toFixed(5)))) : '';
+        const i = +row.dataset.i; const m = mi(pl[i].method); const usd = usdOf(m.cur, pl[i].amt || 0); pl[i].usd = usd;
+        row.querySelector('.pl-usd').textContent = usd > 0 ? ('= USD ' + fmt.esp(usd)) : '';
       });
     };
-    const fmtDecLocal = (v) => String(parseFloat((Number(v) || 0).toFixed(8)));
-    $('#payAdd').addEventListener('click', () => { pl.push({ method: PAY_METHODS.find(m => m.cur === 'BS') ? PAY_METHODS.find(m => m.cur === 'BS').k : 'efectivoBs', amt: 0 }); paint(); });
+    $('#payAdd').addEventListener('click', () => { pl.push({ method: PAY_METHODS.find(mm => mm.cur === 'BS') ? PAY_METHODS.find(mm => mm.cur === 'BS').k : 'efectivoBs', amt: 0 }); paint(); });
     paint();
     $('#payOk').addEventListener('click', () => {
       const isCredit = !!($('#chkCredito') && $('#chkCredito').checked);
       if (!isCredit) {
-        let paid = 0; pl.forEach(ln => { const m = mi(ln.method); paid += usdOf(m.cur, ln.amt || 0); });
-        const paidR = fmt.rnd(paid, 2);
-        if (paidR < due - 0.005) { toast('Falta por cubrir ' + fmt.money(fmt.rnd(due - paidR, 2)), 'warn'); return; }
+        const paidR = fmt.rnd(paidTotal(), 2);
+        if (paidR < due - 0.005) { toast('Falta por cubrir ' + fmt.moneyEsp(fmt.rnd(due - paidR, 2)), 'warn'); return; }
       }
       const payments = pl.map(ln => { const m = mi(ln.method); const usd = usdOf(m.cur, ln.amt || 0); return { method: ln.method, cur: m.cur, amount: fmt.rnd(ln.amt || 0, m.cur === 'BS' ? 2 : 8), usd: fmt.rnd(usd, 8) }; }).filter(p => p.usd > 0);
-      let paid = payments.reduce((s, p) => s + p.usd, 0);
+      const paid = payments.reduce((s, p) => s + p.usd, 0);
       const changeUSD = Math.max(0, fmt.rnd(paid - due, 2));
       finalizeSale(due, base, tax, { payments, changeUSD });
     });

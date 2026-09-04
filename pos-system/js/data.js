@@ -145,6 +145,31 @@ const fmt = {
     else if (s.split('.')[1].length < 2) s = n.toFixed(2);
     return '$ ' + s;
   },
+  // Formato de montos: "X.XXX.XXX,XX" (miles con punto, decimales con coma).
+  esp(v) {
+    const n = Number(v) || 0;
+    const neg = n < 0;
+    const t = Math.abs(n).toFixed(2);
+    const sp = t.split('.');
+    let i = sp[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (neg ? '-' : '') + i + ',' + sp[1];
+  },
+  parseEsp(s) {
+    s = String(s == null ? '' : s).trim().replace(/[^0-9.,-]/g, '');
+    if (!s) return 0;
+    let neg = false;
+    if (s.charAt(0) === '-') { neg = true; s = s.slice(1); }
+    if (s.includes(',')) {
+      s = s.replace(/\./g, '').replace(/,/g, '.');
+    } else {
+      const dots = (s.match(/\./g) || []).length;
+      if (dots > 1) s = s.replace(/\./g, '');
+    }
+    const v = parseFloat(s);
+    return isFinite(v) ? (neg ? -v : v) : 0;
+  },
+  moneyEsp(v) { return '$ ' + this.esp(v); },
+  bsEsp(v) { return 'Bs. ' + this.esp(v); },
   usdRate() { return Number(db.settings?.pos?.usdRate) || 36; },
   // Equivalencia en Bolívares (moneda secundaria): USD × tasa
   bs(v) {
