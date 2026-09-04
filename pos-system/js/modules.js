@@ -336,7 +336,7 @@ function paintInventory() {
     if (c && p.category !== c) return false;
     if (q && !p.code.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
     return true;
-  });
+  }).map(p => { canonicalizeProduct(p); return p; });
   const tb = $('#invTbody');
   if (!tb) return;
   if (list.length === 0) { tb.innerHTML = `<tr><td colspan="8" class="empty">Sin resultados</td></tr>`; return; }
