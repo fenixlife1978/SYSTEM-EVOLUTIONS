@@ -686,12 +686,22 @@ function productForm(id) {
   const baseRow = { unidad: bp.unidad || 'Unidad', equiv: bp.contenido || 1, precio: Number(bp.precio) || 0, tipo: (exBase ? exBase.tipo : 'MANUAL'), activa: true, base: true };
   const others = existing.filter(x => !x.base).map(x => ({ unidad: x.unidad, equiv: x.equiv, precio: x.precio, tipo: (x.tipo || 'MANUAL'), activa: x.activa !== false, base: false }));
   let rows = [baseRow, ...others];
+  const MAIN_CATS = ['Licores', 'Cervezas', 'Vinos', 'Destilados', 'Bebidas', 'Aguas', 'Tabacos', 'Snacks', 'Lácteos', 'Cárnicos', 'Limpieza', 'Bazar'];
+  const catList = [...new Set(MAIN_CATS.concat(p.category || []).concat(db.products.map(x => x.category)).filter(Boolean))];
 
   const html = `
     <div class="form-grid">
       <div class="field span-2"><label>Código de barras</label><input id="pcCode" value="${esc(p.code)}" placeholder="Leer con escáner o escribir código" autofocus /></div>
       <div class="field span-2"><label>Nombre del producto</label><input id="pcName" value="${esc(p.name)}" /></div>
-      <div class="field span-2"><label>Categoría</label><input id="pcCat" value="${esc(p.category)}" placeholder="Ej. Bebidas, Lácteos…" /></div>
+      <div class="field span-2"><label>Categoría</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="pcCat" value="${esc(p.category)}" placeholder="Seleccione o escriba una categoría" style="flex:1" />
+          <button type="button" id="pcCatTgl" class="btn sm" title="Mostrar categorías">＋</button>
+        </div>
+        <div id="pcCatPanel" style="display:none;margin-top:6px;flex-wrap:wrap;gap:6px">
+          ${catList.map(c => `<button type="button" class="btn sm cat-opt" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+        </div>
+      </div>
       <div class="field"><label>Régimen IVA</label>
         <select id="pcTax"><option value="grabable" ${taxSel === 'grabable' ? 'selected' : ''}>Incluye IVA (gravado)</option><option value="exento" ${taxSel === 'exento' ? 'selected' : ''}>Exento de IVA</option></select>
       </div>
@@ -792,6 +802,11 @@ function productForm(id) {
     const isBase0 = (el) => rows[+el.dataset.i].base;
 
     const repaintAll = () => { paintRows(); showEquiv(); };
+    // Desplegable de categorías (+ / −)
+    const catTgl = $('#pcCatTgl'), catPanel = $('#pcCatPanel');
+    let catOpen = false;
+    catTgl.addEventListener('click', () => { catOpen = !catOpen; catPanel.style.display = catOpen ? 'flex' : 'none'; catTgl.textContent = catOpen ? '−' : '＋'; });
+    catPanel.querySelectorAll('.cat-opt').forEach(b => b.addEventListener('click', () => { $('#pcCat').value = b.dataset.cat; catOpen = false; catPanel.style.display = 'none'; catTgl.textContent = '＋'; }));
     $('#pcAdd').addEventListener('click', () => { rows.push({ unidad: pcCanon.value || 'Unidad', equiv: 1, precio: 0, tipo: 'AUTO', activa: true, base: false }); paintRows(); });
     [pcBaseUnit, pcCanon].forEach(el => el.addEventListener('change', repaintAll));
     [pcBaseCont, pcCost].forEach(el => el.addEventListener('input', repaintAll));
