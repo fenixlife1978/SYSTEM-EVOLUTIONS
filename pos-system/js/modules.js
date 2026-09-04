@@ -541,6 +541,9 @@ function productForm(id, cloneSourceId) {
         <div class="field"><label>Costo por Unidad Base (USD)</label><input type="text" inputmode="decimal" id="pcCostBase" value="${fmtDec(costBaseVal)}" placeholder="0.00" /></div>
         <div class="field"><label>Costo por Unidad Canónica (USD)</label><input type="text" inputmode="decimal" id="pcCost" value="${fmtDec(Number(p.cost) || 0)}" readonly style="background:#f3f4f6" /></div>
         <div class="field"><label>% Ganancia</label><input type="number" step="0.01" min="0" max="99.99" id="pcGain" value="${gainVal}" /></div>
+        <div class="field"><label>Precio Mayorista (USD)</label><input type="text" inputmode="decimal" id="pxMayor" value="${Number(p.pxMayorista) > 0 ? fmtDec(p.pxMayorista) : ''}" placeholder="0,00" /></div>
+        <div class="field"><label>Precio Especial (USD)</label><input type="text" inputmode="decimal" id="pxEspec" value="${Number(p.pxEspecial) > 0 ? fmtDec(p.pxEspecial) : ''}" placeholder="0,00" /></div>
+        <div class="field"><label>Precio Mínimo (USD)</label><input type="text" inputmode="decimal" id="pxMin" value="${Number(p.pxMinimo) > 0 ? fmtDec(p.pxMinimo) : ''}" placeholder="0,00" /></div>
       </div>
       <div style="font-size:11px;color:#6b7280;margin-top:4px">El precio <b>automático</b> de una presentación = Costo × (1 + %Ganancia/100) × equivalencia. Si es <b>manual</b>, al editar el precio se recalcula el %Ganancia (máx. 99.99%).</div>
     </div>
@@ -663,6 +666,9 @@ function productForm(id, cloneSourceId) {
         stockMaximo: parseFloat($('#pcStockMax').value) || 0,
         cost: cost(),
         margin: gain(),
+        pxMayorista: pnum($('#pxMayor').value),
+        pxEspecial: pnum($('#pxEspec').value),
+        pxMinimo: pnum($('#pxMin').value),
         variantGroup: p.variantGroup
       };
       canonicalizeProduct(prod);
