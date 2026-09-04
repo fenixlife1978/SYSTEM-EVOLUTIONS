@@ -956,7 +956,8 @@ function posArqueo() {
   const salesToday = db.sales.filter(s => String(s.date).startsWith(today));
   const ventasDia = salesToday.reduce((s, x) => s + x.total, 0);
   const creditoDia = salesToday.filter(s => s.status === 'credit').reduce((s, x) => s + x.total, 0);
-  const devoluciones = salesToday.filter(s => s.status === 'refunded').reduce((s, x) => s + x.total, 0);
+  const refundsToday = refundsAll().filter(r => String(r.date).startsWith(today));
+  const devoluciones = refundsToday.reduce((s, r) => s + (Number(r.usd) || 0), 0);
   const movCaja = db.cashbox.filter(c => String(c.date).startsWith(today)).reduce((s, x) => s + x.amount, 0);
   const tasa = fmt.usdRate();
 
@@ -972,6 +973,9 @@ function posArqueo() {
       amtUsd[s.method] = (amtUsd[s.method] || 0) + s.total;
     }
   });
+
+  // Restar reembolsos (por el método usado para devolver) del monto esperado por método
+  refundsToday.forEach(r => { const k = r && r.method; if (k) amtUsd[k] = (amtUsd[k] || 0) - (Number(r.usd) || 0); });
 
   const bsM = PAY_METHODS.filter(m => m.cur === 'BS');
   const usdM = PAY_METHODS.filter(m => m.cur === 'USD');
@@ -1154,7 +1158,7 @@ function posReportZ() {
   const nArt = salesToday.reduce((s, x) => s + (x.items || 0), 0);
   const contado = salesToday.filter(s => s.status === 'paid').reduce((s, x) => s + x.total, 0);
   const credito = salesToday.filter(s => s.status === 'credit').reduce((s, x) => s + x.total, 0);
-  const reemb = salesToday.filter(s => s.status === 'refunded').reduce((s, x) => s + x.total, 0);
+  const reemb = refundsAll().filter(r => String(r.date).startsWith(today)).reduce((s, r) => s + (Number(r.usd) || 0), 0);
   const tasa = fmt.usdRate();
   const taxIncl = db.settings.tax?.included !== false;
   const r = (db.settings.tax?.rate || 0) / 100;
@@ -1360,31 +1364,67 @@ function posSuspend() { posPending(); }
 
 /* F10 — Reembolso (búsqueda de venta previa) */
 function posRefund() {
-  const html = `
+  const eligible = db.sales.filter(s => s.status !== 'refunded');
+  if (!eligible.length) { toast('No hay ventas reembolsables', 'warn'); return; }
+  const body = `
     <div class="field"><label>Venta a reembolsar</label>
-      <select id="rfSale">${db.sales.map(s => `<option value="${s.id}">${s.number} — ${s.client} — ${fmt.money(s.total)}</option>`).join('')}</select>
+      <select id="rfSale">${eligible.map(s => `<option value="${s.id}">${s.number} — ${s.client} — ${fmt.money(s.total)}</option>`).join('')}</select>
     </div>
-    <p style="color:#6b7280;font-size:12px">Se registrará la devolución como egreso y se restaurará el stock.</p>
+    <div id="rfItems" style="margin-top:10px"></div>
+    <div class="form-grid" style="margin-top:10px">
+      <div class="field span-2"><label>Reembolsar mediante (método de pago)</label>
+        <select id="rfMethod">${PAY_METHODS.map(m => `<option value="${m.k}">${m.lbl}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-top:10px">
+      <b style="color:#b91c1c">Total a reembolsar</b><b id="rfTotal" style="font-size:22px;color:#b91c1c;font-family:Consolas,monospace">$ 0,00</b>
+    </div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
-                  <button class="btn danger" id="rfOk">Procesar reembolso</button>`;
-  openModal({ title: 'F10 — Reembolso', body: html, footer });
+                  <button class="btn danger" id="rfOk">${ico('close')} Procesar reembolso</button>`;
+  openModal({ title: 'F10 — Reembolso (parcial o total)', body, footer, size: 'modal-lg' });
   setTimeout(() => {
-    $('#rfOk').addEventListener('click', () => {
-      const id = +$('#rfSale').value;
-      const s = db.sales.find(x => x.id === id);
-      if (!s) return;
-      db.accounting.unshift({
-        id: db.accounting.length + 1,
-        date: veDate(),
-        type: 'egreso', category: 'Devoluciones',
-        description: `Reembolso ${s.number}`, amount: s.total, ref: 'R-' + s.number
+    const repaint = () => {
+      const s = db.sales.find(x => x.id === +$('#rfSale').value);
+      const box = $('#rfItems'); if (!s || !box) return;
+      const lines = Array.isArray(s.lines) ? s.lines : [];
+      box.innerHTML = `
+        <b style="font-size:12px;color:#1f2937">Items de la venta ${s.number}</b>
+        <table class="dt" style="width:100%;margin-top:6px"><thead><tr><th>Producto</th><th>UM</th><th class="num">Vendido</th><th class="num">Precio</th><th class="num">Devolver</th><th class="num">Monto</th></tr></thead><tbody>
+          ${lines.map((l, i) => `<tr>
+            <td>${l.name}</td>
+            <td>${unitAbbr(l.present || l.base || 'Und', l.qty)}</td>
+            <td class="num">${fmtNumStock(l.qty)}</td>
+            <td class="num">${fmt.frac(l.price)}</td>
+            <td class="num"><input type="text" inputmode="decimal" class="rf-qty" data-i="${i}" value="${fmt.esp(l.qty)}" style="width:90px;text-align:right" /></td>
+            <td class="num rf-line">${fmt.money(0)}</td>
+          </tr>`).join('')}
+        </tbody></table>`;
+      box.querySelectorAll('.rf-qty').forEach(inp => inp.addEventListener('input', total));
+      total();
+    };
+    const total = () => {
+      const s = db.sales.find(x => x.id === +$('#rfSale').value);
+      const lines = (s && Array.isArray(s.lines)) ? s.lines : [];
+      let sum = 0;
+      Array.from($('#rfItems').querySelectorAll('.rf-qty')).forEach(inp => {
+        const i = +inp.dataset.i; const l = lines[i]; const q = Math.min(fmt.parseEsp(inp.value), Number(l.qty) || 0);
+        const amt = q * (Number(l.price) || 0); sum += amt;
+        const cell = inp.closest('tr').querySelector('.rf-line'); if (cell) cell.textContent = fmt.money(amt);
       });
-      const idx = db.sales.findIndex(x => x.id === id);
-      if (idx >= 0) db.sales[idx].status = 'refunded';
-      DB.save(db);
+      $('#rfTotal').textContent = fmt.moneyEsp(sum);
+    };
+    $('#rfSale').addEventListener('change', repaint);
+    repaint();
+    $('#rfOk').addEventListener('click', () => {
+      const s = db.sales.find(x => x.id === +$('#rfSale').value);
+      if (!s) return;
+      const qtyArr = (Array.isArray(s.lines) ? s.lines : []).map(l => 0);
+      Array.from($('#rfItems').querySelectorAll('.rf-qty')).forEach(inp => { qtyArr[+inp.dataset.i] = fmt.parseEsp(inp.value); });
+      const r = applyRefund(s.id, qtyArr, $('#rfMethod').value);
+      if (!r) return;
       closeModal();
-      toast(`Reembolso procesado: ${fmt.money(s.total)}`, 'success');
+      toast(`Reembolso ${r.full ? 'total' : 'parcial'} procesado: ${fmt.money(r.totalUsd)}`, r.full ? 'warn' : 'success', 3200);
     });
   }, 60);
 }

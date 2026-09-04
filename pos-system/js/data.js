@@ -24,6 +24,7 @@ const seedData = {
   payables: [],
   purchases: [],
   sales: [],
+  refunds: [],
   accounting: [],
   cashbox: [],
 
