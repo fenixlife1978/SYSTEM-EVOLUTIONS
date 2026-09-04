@@ -473,39 +473,34 @@ function posCheckout() {
   if (ticket.items.length === 0) { toast('El ticket está vacío', 'warn'); return; }
   const { lines, base, tax, subtotal, RW } = getReceiptLines();
   const rpText = lines.join('\n');
-  const footLines = String(db.settings.pos.receiptFooter || '').split('\n').map(t => t.trim()).filter(Boolean);
+  const rate = fmt.usdRate() || 36;
+  const due = fmt.rnd(subtotal, 2); // total a cobrar (moneda en centavos)
+  const mi = (k) => PAY_METHODS.find(m => m.k === k);
+  const pnumC = (s) => { const v = parseFloat(String(s == null ? '' : s).replace(',', '.')); return isFinite(v) ? v : 0; };
+  const usdOf = (cur, amt) => cur === 'BS' ? (amt / (rate || 1)) : amt;
+  // Líneas de pago (inicia con un método USD por el total)
+  let pl = [{ method: PAY_METHODS.find(m => m.cur === 'USD') ? PAY_METHODS.find(m => m.cur === 'USD').k : 'efectivoUsd', amt: due }];
 
   const html = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
       <div>
-        <div class="receipt-preview" style="margin-bottom:12px">
+        <div class="receipt-preview">
           <div style="white-space:pre-wrap;font-family:Consolas,'Courier New',monospace;width:${RW}ch;font-weight:600;line-height:1.45">${rpText}</div>
-          <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:2px dashed #c4ccd6">
-            <img src="${ICONS.logo}" alt="POSsystem Evolution" style="width:150px;height:48px" />
-            <div style="font-weight:700;font-size:13px;color:#1b2a3a">POSsystem Evolution</div>
-            ${footLines.map(l => `<div style="font-size:12px;color:#555">${l}</div>`).join('')}
-          </div>
         </div>
       </div>
       <div>
-        <div class="field">
-          <label>Método de pago</label>
-          <select id="payMethod">
-            ${PAY_METHODS.map(m => `<option value="${m.k}">${m.lbl}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field">
-          <label>Recibido ($)</label>
-          <input id="payRecv" type="number" step="0.01" min="0" value="${subtotal.toFixed(2)}" />
-        </div>
-        <div class="field">
-          <label>Vuelto</label>
-          <input id="payChange" type="text" readonly value="0.00" style="background:#f3f4f6;font-weight:700" />
-        </div>
-        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;text-align:center;margin-top:8px">
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;text-align:center;margin-bottom:12px">
           <div style="font-size:12px;color:#166534">Total a cobrar</div>
-          <div style="font-size:26px;font-weight:800;color:#15803d">${fmt.money(subtotal)}</div>
+          <div style="font-size:26px;font-weight:800;color:#15803d">${fmt.money(due)}</div>
+          <div style="font-size:12px;color:#166534">Tasa: ${fmt.num(rate)} Bs/USD</div>
         </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div style="border:1px solid #fbbf24;border-radius:8px;padding:8px 10px;background:#fffbeb"><div style="font-size:11px;color:#92400e">Falta por cubrir</div><b id="payFalta" style="color:#92400e">${fmt.money(due)}</b><small id="payFaltaBs" style="display:block;color:#b45309"></small></div>
+          <div style="border:1px solid #a7f3d0;border-radius:8px;padding:8px 10px;background:#ecfdf5"><div style="font-size:11px;color:#047857">Vuelto</div><b id="payVueltoUsd" style="color:#047857">$ 0.00</b><small id="payVueltoBs" style="display:block;color:#047857"></small></div>
+        </div>
+        <b style="font-size:12px;color:#374151">Métodos de pago</b>
+        <div id="payLines" style="margin:6px 0"></div>
+        <button type="button" class="btn sm" id="payAdd">+ Agregar método</button>
       </div>
     </div>
   `;
@@ -516,25 +511,66 @@ function posCheckout() {
   `;
   openModal({ title: 'F8 — Cobrar', body: html, footer, size: 'modal-lg' });
   setTimeout(() => {
-    const calc = () => {
-      const r = fmt.rnd(parseFloat($('#payRecv').value) || 0, 2);
-      const due = fmt.rnd(subtotal, 2);
-      // Comparación por centavos (enteros) para evitar ruido de punto flotante
-      const diffCents = Math.round(r * 100) - Math.round(due * 100);
-      const c = diffCents <= 0 ? 0 : (diffCents / 100);
-      $('#payChange').value = fmt.num(c);
+    const paint = () => {
+      const box = $('#payLines'); if (!box) return;
+      box.innerHTML = pl.map((ln, i) => {
+        const m = mi(ln.method); const cur = m ? m.cur : 'USD';
+        const txt = (ln.amt == null || ln.amt === 0) ? '' : (cur === 'BS' ? fmtDecLocal(ln.amt) : fmtDecLocal(ln.amt));
+        return `<div style="display:grid;grid-template-columns:1.2fr 1fr 150px 28px;gap:6px;align-items:center;margin-bottom:6px" data-i="${i}">
+          <select class="pl-m">${PAY_METHODS.map(mm => `<option value="${mm.k}" ${mm.k === ln.method ? 'selected' : ''}>${mm.lbl}</option>`).join('')}</select>
+          <input type="text" inputmode="decimal" class="pl-a" value="${txt}" placeholder="${cur === 'BS' ? 'Monto en Bs.' : 'Monto USD'}" />
+          <span class="pl-usd" style="font-size:11px;color:#15803d"></span>
+          <button type="button" class="btn sm danger pl-del" title="Quitar">&times;</button>
+        </div>`;
+      }).join('');
+      const rows = Array.from(box.querySelectorAll('[data-i]'));
+      rows.forEach(row => {
+        const i = +row.dataset.i;
+        const mSel = row.querySelector('.pl-m'); const aIn = row.querySelector('.pl-a');
+        mSel.addEventListener('change', () => { pl[i].method = mSel.value; paint(); });
+        aIn.addEventListener('input', () => { pl[i].amt = pnumC(aIn.value); recalc(); });
+        row.querySelector('.pl-del').addEventListener('click', () => { pl.splice(i, 1); if (pl.length === 0) pl.push({ method: 'efectivoUsd', amt: 0 }); paint(); recalc(); });
+      });
+      recalc();
     };
-    calc();
-    $('#payRecv').addEventListener('input', calc);
-    $('#payOk').addEventListener('click', () => finalizeSale(subtotal, base, tax));
+    const recalc = () => {
+      let paid = 0;
+      pl.forEach((ln, i) => { const m = mi(ln.method); const cur = m ? m.cur : 'USD'; const usd = usdOf(cur, ln.amt || 0); paid += usd; pl[i].usd = usd; });
+      const falta = Math.max(0, due - paid);
+      const vuelto = Math.max(0, paid - due);
+      $('#payFalta').textContent = fmt.money(falta);
+      $('#payFaltaBs').textContent = 'Bs. ' + fmt.num(falta * rate);
+      $('#payVueltoUsd').textContent = fmt.money(vuelto);
+      $('#payVueltoBs').textContent = 'Bs. ' + fmt.num(vuelto * rate);
+      // etiquetas USD de cada línea
+      Array.from($('#payLines').querySelectorAll('[data-i]')).forEach(row => {
+        const i = +row.dataset.i; const usd = pl[i].usd || 0;
+        row.querySelector('.pl-usd').textContent = usd > 0 ? ('= USD ' + String(parseFloat(usd.toFixed(5)))) : '';
+      });
+    };
+    const fmtDecLocal = (v) => String(parseFloat((Number(v) || 0).toFixed(8)));
+    $('#payAdd').addEventListener('click', () => { pl.push({ method: PAY_METHODS.find(m => m.cur === 'BS') ? PAY_METHODS.find(m => m.cur === 'BS').k : 'efectivoBs', amt: 0 }); paint(); });
+    paint();
+    $('#payOk').addEventListener('click', () => {
+      const isCredit = !!($('#chkCredito') && $('#chkCredito').checked);
+      if (!isCredit) {
+        let paid = 0; pl.forEach(ln => { const m = mi(ln.method); paid += usdOf(m.cur, ln.amt || 0); });
+        const paidR = fmt.rnd(paid, 2);
+        if (paidR < due - 0.005) { toast('Falta por cubrir ' + fmt.money(fmt.rnd(due - paidR, 2)), 'warn'); return; }
+      }
+      const payments = pl.map(ln => { const m = mi(ln.method); const usd = usdOf(m.cur, ln.amt || 0); return { method: ln.method, cur: m.cur, amount: fmt.rnd(ln.amt || 0, m.cur === 'BS' ? 2 : 8), usd: fmt.rnd(usd, 8) }; }).filter(p => p.usd > 0);
+      let paid = payments.reduce((s, p) => s + p.usd, 0);
+      const changeUSD = Math.max(0, fmt.rnd(paid - due, 2));
+      finalizeSale(due, base, tax, { payments, changeUSD });
+    });
   }, 60);
 }
 
-function finalizeSale(total, base, tax) {
-  const selMethod = $('#payMethod') ? $('#payMethod').value : 'efectivoUsd';
-  // Crédito: si el checkbox "Venta a Crédito" está marcado, se carga la deuda
+function finalizeSale(total, base, tax, payData) {
+  payData = payData || { payments: [], changeUSD: 0 };
   const isCredit = !!($('#chkCredito') && $('#chkCredito').checked);
-  const method = isCredit ? 'credit' : selMethod;
+  const payments = isCredit ? [] : (payData.payments || []);
+  const method = isCredit ? 'credit' : (payments.length === 1 ? payments[0].method : (payments.length > 1 ? 'mixto' : 'efectivoUsd'));
   // Registrar venta
   const sale = {
     id: db.sales.length + 1,
@@ -544,6 +580,8 @@ function finalizeSale(total, base, tax) {
     items: ticket.items.length,
     total: total,
     method: method,
+    payments: payments,
+    changeUSD: payData.changeUSD || 0,
     status: isCredit ? 'credit' : 'paid',
     lines: ticket.items.map(it => ({
       pid: it.id, code: it.code, name: it.name, present: it.present || '',
@@ -595,7 +633,8 @@ function finalizeSale(total, base, tax) {
   // Capturar el ticket ANTES de resetear para imprimir la copia correcta
   const receiptHtml = buildReceiptHtml();
   closeModal();
-  toast(`Venta ${ticket.number} procesada: ${fmt.money(total)}`, 'success', 3200);
+  const changeTxt = sale.changeUSD > 0 ? ' · Vuelto: ' + fmt.money(sale.changeUSD) : '';
+  toast(`Venta ${ticket.number} procesada: ${fmt.money(total)}${changeTxt}`, 'success', 3200);
   // Impresión automática si está configurada (impresora térmica 80mm)
   if (db.settings.pos?.printAfterSale) { setTimeout(() => printHtml(receiptHtml), 250); }
   resetTicket();
