@@ -178,16 +178,12 @@ function bindCustomerWidgets() {
   if (cob) cob.addEventListener('click', posCollect);
   const last = $('#btnLastInvoice');
   if (last) last.addEventListener('click', posDaySales);
-  const pend = $('#btnPending');
-  if (pend) pend.addEventListener('click', posPendingList);
   const arq = $('#btnArqueo');
   if (arq) arq.addEventListener('click', posArqueo);
   const z = $('#btnReportZ');
   if (z) z.addEventListener('click', posReportZ);
   const rt = $('#btnChangeRate');
   if (rt) rt.addEventListener('click', posChangeRate);
-  const cc = $('#btnClearCart');
-  if (cc) cc.addEventListener('click', posClearCart);
 }
 function renderCustomerInfo() {
   const bal = Number(ticket.customer?.balance) || 0;
@@ -204,7 +200,8 @@ function posAction(fn) {
     quantity: posQuantity,
     scale: posScale,
     return: posReturn,
-    pending: posPending,
+    clear: posClearCart,
+    pending: posPendingList,
     checkout: posCheckout,
     suspend: posSuspend,
     refund: posRefund,
