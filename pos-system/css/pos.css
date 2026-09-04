@@ -158,6 +158,7 @@
 .pos-table tbody tr td.code{color:#0c8a4a}
 .pos-table tbody tr td.desc{font-family:"Segoe UI",Roboto,sans-serif}
 .pos-table tbody tr td.qty{text-align:right;color:#1e5cab;font-weight:600}
+.pos-table tbody tr td.um{text-align:center;color:#6b7280;font-size:11.5px}
 .pos-table tbody tr td.price{text-align:right}
 .pos-table tbody tr td.subtotal{text-align:right;font-weight:600}
 .pos-table tbody tr td .duo{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}

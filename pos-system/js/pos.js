@@ -55,6 +55,7 @@ function renderTicketTable() {
       <td class="code">${it.code}</td>
       <td class="desc">${it.name}</td>
       <td class="qty">${(it.qty).toFixed(3).replace(/\.?0+$/, m => m.includes('.') ? m : '')}</td>
+      <td class="um">${unitAbbr(it.present || it.base || 'Und', it.qty)}</td>
       <td class="price"><div class="duo"><b>${fmt.money(it.price)}</b><small>${fmt.bs(it.price)}</small></div></td>
       <td class="subtotal"><div class="duo"><b>${fmt.money(it.qty * it.price)}</b><small>${fmt.bs(it.qty * it.price)}</small></div></td>
       <td class="offer">${it.offer || 0}%<span class="row-actions"><button data-rm="${i}" title="Quitar">${ico('close')}</button></span></td>
@@ -70,6 +71,7 @@ function renderTicketTable() {
       <td class="code"><input id="posCode" class="code-input" placeholder="Código" autocomplete="off" spellcheck="false" /></td>
       <td class="desc add-hint">Escriba el código del producto y presione <b>Enter</b> para agregarlo</td>
       <td class="qty"></td>
+      <td class="um"></td>
       <td class="price"></td>
       <td class="subtotal"></td>
       <td class="offer"></td>

@@ -359,6 +359,11 @@ function invDefaultPrice(p) {
   return Number(invBasePres(p).precio) || 0;
 }
 
+/* N.º de presentaciones base completas que hay en stock (stockBase ÷ contenido). */
+function invBaseWhole(p) {
+  return invStock(p) / Math.max(1, Number(invBasePres(p).contenido) || 1);
+}
+
 /* Presentaciones de venta activas con su precio ya resuelto. */
 function invSaleViews(p) {
   return invPreset(p).filter(x => x.activa).map(x => ({ unidad: x.unidad, equiv: x.equiv, precio: resolvePrice(p, x), tipo: x.tipo, base: x.base }));

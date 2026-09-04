@@ -272,7 +272,7 @@ function renderInventory() {
   const list = db.products.map(p => { canonicalizeProduct(p); return p; });
   const totalProducts = list.length;
   const totalStock = list.reduce((s, p) => s + invStock(p), 0);
-  const totalValue = list.reduce((s, p) => s + invStock(p) * invUnitPrice(p), 0);
+  const totalValue = list.reduce((s, p) => s + invBaseWhole(p) * invDefaultPrice(p), 0);
   const lowStock = list.filter(p => invStock(p) < Math.max(1, Number(p.stockMinimo) || 0)).length;
   const cats = [...new Set(db.products.map(p => p.category))];
   const html = `
@@ -303,7 +303,7 @@ function renderInventory() {
         <table class="dt">
           <thead>
             <tr>
-              <th>Código</th><th>Descripción</th><th>Categoría</th><th>Unidad</th>
+              <th>Código</th><th>Descripción</th><th>Categoría</th><th>U. Base</th>
               <th class="num">Stock</th><th class="num">Precio</th><th class="num">Valor</th><th></th>
             </tr>
           </thead>
@@ -320,8 +320,8 @@ function renderInventory() {
   $('#invKardex').addEventListener('click', inventoryKardex);
   $('#exportInv').addEventListener('click', () => {
     const esc = (s) => String(s == null ? '' : s).replace(/"/g, '""');
-    const csv = 'Codigo,Descripcion,Categoria,UnidadCanonica,StockCanonico,StockDescompuesto,PrecioUnidad,Valor\n' +
-      list.map(p => `${p.code},"${esc(p.name)}",${p.category},${invBaseUnit(p)},${invStock(p)},"${esc(invString(p))}",${invUnitPrice(p)},${invStock(p) * invUnitPrice(p)}`).join('\n');
+    const csv = 'Codigo,Descripcion,Categoria,UnidadCanonica,StockCanonico,StockDescompuesto,PrecioBase,ValorBase\n' +
+      list.map(p => `${p.code},"${esc(p.name)}",${p.category},${invBaseUnit(p)},${invStock(p)},"${esc(invString(p))}",${invDefaultPrice(p)},${(invBaseWhole(p) * invDefaultPrice(p)).toFixed(6)}`).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = 'inventario.csv'; a.click();
@@ -345,10 +345,10 @@ function paintInventory() {
       <td><code>${p.code}</code></td>
       <td>${p.name}</td>
       <td>${p.category}</td>
-      <td>${invBaseUnit(p)}${p.weighed ? ' (peso)' : ''}</td>
+      <td title="${invBaseUnit(p)} (unidad canónica)">${unitAbbrPlural(invBasePres(p).unidad)}${p.weighed ? ' (peso)' : ''}</td>
       <td class="num" title="${fmtNumK(invStock(p))} ${invBaseUnit(p)}">${invBreakdown(p, invStock(p))}</td>
-      <td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td>
-      <td class="num">${fmt.money(invStock(p) * invUnitPrice(p))}</td>
+      <td class="num" title="Precio de la presentación base (${invBasePres(p).unidad})">${fmt.moneyDyn(invDefaultPrice(p))}</td>
+      <td class="num" title="Valor = ${fmtNumK(invBaseWhole(p))} ${invBasePres(p).unidad} × precio base">${fmt.money(invBaseWhole(p) * invDefaultPrice(p))}</td>
       <td class="actions-cell">
         <button class="btn sm" data-edit="${p.id}">Editar</button>
         <button class="btn sm danger" data-del="${p.id}">${ico('close')}</button>
@@ -1709,9 +1709,9 @@ function renderReports() {
 
 function reportInventory() {
   const plist = db.products.map(p => { canonicalizeProduct(p); return p; });
-  const total = plist.reduce((s, p) => s + invStock(p) * invUnitPrice(p), 0);
+  const total = plist.reduce((s, p) => s + invBaseWhole(p) * invDefaultPrice(p), 0);
   const units = plist.reduce((s, p) => s + invStock(p), 0);
-  const csvRows = plist.map(p => `${p.code},"${String(p.name).replace(/"/g, '""')}",${p.category},${invStock(p)},${invUnitPrice(p)},${(invStock(p) * invUnitPrice(p)).toFixed(2)}`).join('\n');
+  const csvRows = plist.map(p => `${p.code},"${String(p.name).replace(/"/g, '""')}",${p.category},${invStock(p)},${invDefaultPrice(p)},${(invBaseWhole(p) * invDefaultPrice(p)).toFixed(6)}`).join('\n');
   openModal({ title: 'Reporte de inventario', size: 'modal-lg', body: `
     <div style="display:flex;gap:14px;margin-bottom:12px">
       <div class="kpi" style="flex:1"><div class="kpi-info"><div class="lbl">Total productos</div><div class="val">${plist.length}</div></div></div>
@@ -1720,8 +1720,8 @@ function reportInventory() {
     </div>
     <div class="dt-wrap" style="max-height:400px;overflow:auto">
       <table class="dt">
-        <thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Stock</th><th class="num">Precio/unidad</th><th class="num">Valor</th></tr></thead>
-        <tbody>${plist.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td>${invBreakdown(p, invStock(p))} <small>(${invStock(p)} ${invBaseUnit(p)})</small></td><td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td><td class="num">${fmt.money(invStock(p) * invUnitPrice(p))}</td></tr>`).join('')}</tbody>
+        <thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Stock</th><th class="num">Precio (pres. base)</th><th class="num">Valor</th></tr></thead>
+        <tbody>${plist.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td>${invBreakdown(p, invStock(p))} <small>(${invStock(p)} ${invBaseUnit(p)})</small></td><td class="num">${fmt.moneyDyn(invDefaultPrice(p))} <small>${unitAbbrPlural(invBasePres(p).unidad)}</small></td><td class="num">${fmt.money(invBaseWhole(p) * invDefaultPrice(p))}</td></tr>`).join('')}</tbody>
       </table>
     </div>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
