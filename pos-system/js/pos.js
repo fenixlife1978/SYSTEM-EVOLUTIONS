@@ -384,10 +384,75 @@ function posScale() {
   }, 60);
 }
 
-/* F6 — Devolver item */
+function refundsAll() { if (!Array.isArray(db.refunds)) db.refunds = []; return db.refunds; }
+
+/* Registra un reembolso (parcial o total) de una venta. qtyArray: cant. a devolver por línea (0 = no). */
+function applyRefund(saleId, qtyArray, methodKey) {
+  const s = db.sales.find(x => x.id === saleId);
+  if (!s) return null;
+  if (s.status === 'refunded') { toast('La venta ya fue reembolsada/anulada', 'warn'); return null; }
+  const m = PAY_METHODS.find(x => x.k === methodKey); const cur = m ? m.cur : 'USD';
+  const rate = Number(s.rate) || fmt.usdRate();
+  const lines = Array.isArray(s.lines) ? s.lines : [];
+  const chosen = [];
+  let totalUsd = 0;
+  lines.forEach((l, idx) => {
+    const dev = Math.min(Number(qtyArray[idx]) || 0, Number(l.qty) || 0);
+    if (dev <= 0) return;
+    chosen.push({ pid: l.pid, code: l.code, name: l.name, present: l.present || l.base || 'Und', qty: dev, price: l.price, content: l.content || 1 });
+    totalUsd += dev * (Number(l.price) || 0);
+    const pr = db.products.find(p => p.id === l.pid);
+    if (pr) { canonicalizeProduct(pr); pr.stockBase = (invStock(pr) || 0) + dev * (Number(l.content) || 1); }
+  });
+  if (chosen.length === 0) { toast('Indique qué producto(s) y cantidad(es) reembolsar', 'warn'); return null; }
+  const full = lines.length > 0 && lines.every((l, idx) => (Number(qtyArray[idx]) || 0) >= (Number(l.qty) || 0));
+  refundsAll().unshift({
+    id: Date.now(),
+    date: veStamp(), saleId: s.id, number: s.number, client: s.client, rate,
+    method: methodKey, cur, amount: cur === 'BS' ? totalUsd * rate : totalUsd,
+    usd: totalUsd, total: totalUsd, items: chosen, full: full
+  });
+  db.accounting.unshift({
+    id: db.accounting.length + 1, date: veDate(), type: 'egreso', category: 'Reembolsos',
+    description: `Reembolso ${s.number} (${full ? 'total' : 'parcial'})`, amount: totalUsd, ref: 'R-' + s.number
+  });
+  if (full) { const i = db.sales.findIndex(x => x.id === saleId); if (i >= 0) db.sales[i].status = 'refunded'; }
+  DB.save(db);
+  return { totalUsd, full, count: chosen.length };
+}
+
+/* F6 — Anular (reembolso/venta anulada por completo) */
 function posReturn() {
-  posSearch();
-  toast('Use la búsqueda para registrar un item de devolución (precio negativo).', 'info', 3000);
+  const eligible = db.sales.filter(s => s.status !== 'refunded' && s.status !== 'refunded');
+  if (!eligible.length) { toast('No hay ventas por anular', 'warn'); return; }
+  const saleOpts = () => eligible.map(s => `<option value="${s.id}">${s.number} — ${s.client} — ${fmt.money(s.total)}</option>`).join('');
+  const body = `
+    <div class="field"><label>Venta a anular</label><select id="anSale">${saleOpts()}</select></div>
+    <div id="anDet" style="margin:6px 0;font-size:13px;color:#6b7280"></div>
+    <div class="field"><label>Reembolsar mediante (método de pago)</label>
+      <select id="anMethod">${PAY_METHODS.map(m => `<option value="${m.k}">${m.lbl}</option>`).join('')}</select>
+    </div>
+  `;
+  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button><button class="btn danger" id="anOk">${ico('close')} Anular venta completa</button>`;
+  openModal({ title: 'F6 — Anular venta (reembolso total)', body, footer, size: 'modal-lg' });
+  setTimeout(() => {
+    const upd = () => {
+      const s = db.sales.find(x => x.id === +$('#anSale').value);
+      if (!s) return;
+      const rate = Number(s.rate) || fmt.usdRate();
+      $('#anDet').innerHTML = `Cliente: <b>${s.client}</b> · Items: <b>${(s.lines || []).length}</b> · Total: <b style="color:#b91c1c">${fmt.money(s.total)}</b> · Bs. ${fmt.esp(s.total * rate)}`;
+    };
+    $('#anSale').addEventListener('change', upd); upd();
+    $('#anOk').addEventListener('click', () => {
+      if (!confirm('¿Anular esta venta por completo y reintegrar el stock?')) return;
+      const s = db.sales.find(x => x.id === +$('#anSale').value);
+      if (!s) return;
+      const qtyAll = (s.lines || []).map(l => l.qty);
+      const r = applyRefund(s.id, qtyAll, $('#anMethod').value);
+      if (!r) return;
+      closeModal(); toast('Venta anulada · Reembolso ' + fmt.money(r.totalUsd), 'warn', 3200);
+    });
+  }, 60);
 }
 
 /* F7 — Ticket pendiente (guardar sin cobrar) */

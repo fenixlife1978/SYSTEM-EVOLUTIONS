@@ -129,7 +129,7 @@ function bindGlobal() {
     if (e.key === 'F2') { e.preventDefault(); posAction('search'); }
     if (e.key === 'F3') { e.preventDefault(); posAction('link'); }
     if (e.key === 'F4') { e.preventDefault(); posAction('quantity'); }
-    if (e.key === 'F5') { e.preventDefault(); posAction('scale'); }
+    if (e.key === 'F5') { e.preventDefault(); posAction('clear'); }
     if (e.key === 'F6') { e.preventDefault(); posAction('return'); }
     if (e.key === 'F7') { e.preventDefault(); posAction('pending'); }
     if (e.key === 'F8') { e.preventDefault(); posAction('checkout'); }
