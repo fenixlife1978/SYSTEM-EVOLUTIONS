@@ -343,7 +343,7 @@ function paintInventory() {
   tb.innerHTML = list.map(p => `
     <tr>
       <td><code>${p.code}</code></td>
-      <td>${p.name}</td>
+      <td>${p.name}${p.variantGroup ? ' <span class="pill blue">variante</span>' : ''}</td>
       <td>${p.category}</td>
       <td title="${invBaseUnit(p)} (unidad canónica)">${unitAbbrPlural(invBasePres(p).unidad)}${p.weighed ? ' (peso)' : ''}</td>
       <td class="num" title="${fmtNumK(invStock(p))} ${invBaseUnit(p)}">${invBreakdown(p, invStock(p))}</td>
@@ -351,11 +351,13 @@ function paintInventory() {
       <td class="num" title="Valor = ${fmtNumK(invBaseWhole(p))} ${invBasePres(p).unidad} × precio base">${fmt.money(invBaseWhole(p) * invDefaultPrice(p))}</td>
       <td class="actions-cell">
         <button class="btn sm" data-edit="${p.id}">Editar</button>
+        <button class="btn sm" data-var="${p.id}" title="Crear variante independiente">＋ Var</button>
         <button class="btn sm danger" data-del="${p.id}">${ico('close')}</button>
       </td>
     </tr>
   `).join('');
   $$('button[data-edit]', tb).forEach(b => b.addEventListener('click', () => productForm(+b.dataset.edit)));
+  $$('button[data-var]', tb).forEach(b => b.addEventListener('click', () => openProductVariant(+b.dataset.var)));
   $$('button[data-del]', tb).forEach(b => b.addEventListener('click', () => {
     if (!confirm('¿Eliminar este producto?')) return;
     db.products = db.products.filter(x => x.id !== +b.dataset.del);
@@ -462,10 +464,25 @@ function showKardex(pid) {
    PRODUCTO — formulario canónico (Fase 1)
    Fuente única de inventario: stockBase en invBaseUnit.
    ============================================================ */
-function productForm(id) {
+/* Abre un formulario en blanco para crear una VARIANTE INDEPENDIENTE basada en un producto,
+   conservando su configuración base pero con inventario, código y datos editables por separado. */
+function openProductVariant(srcId) { productForm(null, srcId); }
+
+function productForm(id, cloneSourceId) {
   const editing = typeof id === 'number' && !!db.products.find(x => x.id === id);
   const source = editing ? db.products.find(x => x.id === id) : null;
-  const p = source ? canonicalizeProduct(JSON.parse(JSON.stringify(source))) : Object.assign(newProductShell(), { code: '', name: '', category: 'General', taxed: true });
+  let p;
+  if (editing) {
+    p = canonicalizeProduct(JSON.parse(JSON.stringify(source)));
+  } else if (cloneSourceId != null && db.products.find(x => x.id === cloneSourceId)) {
+    const t = canonicalizeProduct(JSON.parse(JSON.stringify(db.products.find(x => x.id === cloneSourceId))));
+    p = JSON.parse(JSON.stringify(t));
+    p.id = null; p.code = ''; p.stockBase = 0; p.stockMinimo = 0; p.stockMaximo = 0;
+    p.variantGroup = (p.variantGroup || ('G' + cloneSourceId));
+    p.name = t.name + ' · NUEVA VARIANTE';
+  } else {
+    p = Object.assign(newProductShell(), { code: '', name: '', category: 'General', taxed: true });
+  }
   ensureUnitsCatalog();
   const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const uOpt = (sel) => unitList().map(u => `<option value="${esc(u.name)}" ${u.name === sel ? 'selected' : ''}>${esc(u.name)} (${esc(u.symbol)})</option>`).join('');
@@ -645,7 +662,8 @@ function productForm(id) {
         stockMinimo: parseFloat($('#pcStockMin').value) || 0,
         stockMaximo: parseFloat($('#pcStockMax').value) || 0,
         cost: cost(),
-        margin: gain()
+        margin: gain(),
+        variantGroup: p.variantGroup
       };
       canonicalizeProduct(prod);
       if (editing) Object.assign(source, prod); else db.products.push(prod);
