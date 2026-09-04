@@ -5,6 +5,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('posdesktop', {
   isDesktop: true,
+  // Build "demo"/portable = edición de demostración limitada
+  isDemo: !!process.env.PORTABLE_EXECUTABLE_FILE,
   versions: {
     electron: process.versions.electron,
     node: process.versions.node,

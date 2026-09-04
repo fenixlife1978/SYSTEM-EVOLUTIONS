@@ -96,6 +96,12 @@ function lookupProductByCode(code) {
   if (!code) return null;
   return db.products.find(p => String(p.code).trim() === code) || null;
 }
+/* Todos los productos/variantes que comparten el mismo código de barras. */
+function lookupVariantsByCode(code) {
+  code = String(code == null ? '' : code).trim();
+  if (!code) return [];
+  return db.products.filter(p => String(p.code).trim() === code);
+}
 
 /* Enfoca la fila de entrada de código (buscador manual) cuando el POS está visible */
 function focusCodeInput() {
@@ -116,14 +122,16 @@ function bindCodeInput() {
       e.preventDefault();
       const code = inp.value;
       if (!code.trim()) return;
-      const p = lookupProductByCode(code);
-      if (!p) {
+      const cand = lookupVariantsByCode(code);
+      if (cand.length === 0) {
         toast('Producto no encontrado: ' + code.trim(), 'error', 2600);
         inp.select();
         return;
       }
       inp.value = '';
-      addProductToTicket(p);
+      // Varias variantes comparten el código → el cajero elige cuál
+      if (cand.length > 1) { posPickVariant(cand); return; }
+      addProductToTicket(cand[0]);
       // Re-enfocar la siguiente línea (se omite si se abrió un modal para presentación/peso)
       setTimeout(() => {
         if (!($('#modalBackdrop') && $('#modalBackdrop').style.display === 'flex')) focusCodeInput();
@@ -1322,8 +1330,35 @@ function addProductToTicket(p) {
 }
 
 /* Seleccionar la presentación/unidad de venta de un producto canónico */
+/* Varias variantes comparten el código → el cajero elige cuál vender. */
+function posPickVariant(list) {
+  const cards = list.map((p, i) => {
+    canonicalizeProduct(p);
+    return `
+      <div style="display:flex;align-items:center;gap:12px;border:1px solid #e2e6ec;border-radius:8px;padding:10px 12px;background:#fff">
+        <div style="flex:1">
+          <b>${p.name}</b>
+          <div style="font-size:12px;color:#6b7280">${p.present || invBasePres(p).unidad} · Código ${p.code}</div>
+          <div style="font-size:11px;color:#6b7280">Disponible: ${invString(p)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="color:#15803d;font-weight:800;font-family:Consolas,monospace">${fmt.moneyDyn(invDefaultPrice(p))}</div>
+          <small style="font-size:11px;color:#6b7280">${fmt.bs(invDefaultPrice(p))}</small>
+        </div>
+        <button class="btn primary" data-pv="${i}">${ico('check')} Vender</button>
+      </div>`;
+  }).join('');
+  const html = `
+    <p style="color:#374151;font-weight:600;margin:0 0 4px">El código tiene varias presentaciones</p>
+    <p style="color:#6b7280;font-size:12px;margin:0 0 10px">Seleccione la variante a vender</p>
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto">${cards}</div>`;
+  openModal({ title: 'Seleccionar presentación', body: html, footer: `<button class="btn" onclick="closeModal()">Cancelar</button>` });
+  setTimeout(() => {
+    $$('button[data-pv]').forEach(b => b.addEventListener('click', () => { closeModal(); addProductToTicket(list[+b.dataset.pv]); }));
+  }, 60);
+}
+
 function openPickCanonical(p, views) {
-  const av = validateStock(p, invBasePres(p).contenido, 0); // sólo para mostrar disponibilidad
   const cards = views.map((v, i) => `
       <div style="display:flex;align-items:center;gap:10px;border:1px solid #e2e6ec;border-radius:8px;padding:10px 12px;background:#fff">
         <div style="flex:1">
