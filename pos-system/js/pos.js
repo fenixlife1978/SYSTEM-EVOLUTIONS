@@ -57,7 +57,7 @@ function renderTicketTable() {
       <td class="qty">${(it.qty).toFixed(3).replace(/\.?0+$/, m => m.includes('.') ? m : '')}</td>
       <td class="um">${unitAbbr(it.present || it.base || 'Und', it.qty)}</td>
       <td class="price"><div class="duo"><b>${fmt.frac(it.price)}</b><small>${fmt.bs(it.price)}</small></div></td>
-      <td class="subtotal"><div class="duo"><b>${fmt.frac(it.qty * it.price)}</b><small>${fmt.bs(it.qty * it.price)}</small></div></td>
+      <td class="subtotal"><div class="duo"><b>${fmt.money(it.qty * it.price)}</b><small>${fmt.bs(it.qty * it.price)}</small></div></td>
       <td class="offer">${it.offer || 0}%<span class="row-actions"><button data-rm="${i}" title="Quitar">${ico('close')}</button></span></td>
     `;
     body.appendChild(tr);
