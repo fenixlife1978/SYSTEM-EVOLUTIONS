@@ -1456,7 +1456,7 @@ function posPrices() {
 }
 
 /* F12 — Gestión de clientes (atajo) */
-function posCustomers() { showDashboard('clients'); }
+function posCustomers() { clientForm(); }
 
 /* Next — Limpiar / nuevo ticket */
 function posNext() {

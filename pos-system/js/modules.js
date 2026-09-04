@@ -817,6 +817,7 @@ function cxcForm() {
       <div class="field"><label>N° Documento</label><input id="cxcNum" value="F-2025-${String(Math.floor(Math.random()*999)).padStart(3,'0')}" /></div>
       <div class="field"><label>Total</label><input type="number" step="0.01" id="cxcTotal" value="0" /></div>
       <div class="field"><label>Vencimiento</label><input type="date" id="cxcDue" value="${(() => { const d = new Date(); d.setDate(d.getDate()+30); return d.toISOString().slice(0,10); })()}" /></div>
+      <div class="field span-2"><label>Motivo</label><input id="cxcMotivo" type="text" placeholder="Describa el motivo de la factura (texto libre)..." /></div>
     </div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
@@ -831,7 +832,8 @@ function cxcForm() {
         date: $('#cxcDate').value, docType: $('#cxcType').value,
         docNumber: $('#cxcNum').value, client: c.name,
         total, paid: 0, balance: total,
-        dueDate: $('#cxcDue').value, status: 'pending'
+        dueDate: $('#cxcDue').value, status: 'pending',
+        motivo: $('#cxcMotivo').value.trim()
       };
       db.receivables.unshift(r);
       c.balance = (c.balance || 0) + total;
