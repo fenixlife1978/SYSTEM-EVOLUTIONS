@@ -802,9 +802,18 @@ function posArqueo() {
   const movCaja = db.cashbox.filter(c => String(c.date).startsWith(today)).reduce((s, x) => s + x.amount, 0);
   const tasa = fmt.usdRate();
 
-  // Monto USD registrado por el sistema, agrupado por método (ventas pagadas de hoy)
+  // Monto USD registrado por el sistema, agrupado por método real de pago.
+  // Las ventas "mixtas" se desglosan por sus payments (Bs y/o USD); las antiguas
+  // sin desglose se atribuyen al método único indicado.
   const amtUsd = {};
-  salesToday.forEach(s => { if (s.status === 'paid' && s.method) amtUsd[s.method] = (amtUsd[s.method] || 0) + s.total; });
+  salesToday.forEach(s => {
+    if (s.status !== 'paid') return;
+    if (Array.isArray(s.payments) && s.payments.length) {
+      s.payments.forEach(p => { const k = p && p.method; if (k) amtUsd[k] = (amtUsd[k] || 0) + (Number(p.usd) || 0); });
+    } else if (s.method && s.method !== 'mixto') {
+      amtUsd[s.method] = (amtUsd[s.method] || 0) + s.total;
+    }
+  });
 
   const bsM = PAY_METHODS.filter(m => m.cur === 'BS');
   const usdM = PAY_METHODS.filter(m => m.cur === 'USD');
