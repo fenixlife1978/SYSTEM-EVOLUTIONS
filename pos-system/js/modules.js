@@ -673,6 +673,9 @@ function productForm(id) {
   ensureUnitsCatalog();
   const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const uOpt = (sel) => unitList().map(u => `<option value="${esc(u.name)}" ${u.name === sel ? 'selected' : ''}>${esc(u.name)} (${esc(u.symbol)})</option>`).join('');
+  // Entrada libre de números decimales (acepta coma o punto y se puede borrar hasta el último dígito)
+  const pnum = (s) => { const t = String(s == null ? '' : s).trim().replace(/,/g, '.'); if (!t) return 0; const v = parseFloat(t); return isFinite(v) ? v : 0; };
+  const fmtDec = (v) => { const x = Number(v); if (!isFinite(x)) return '0'; return String(parseFloat(x.toFixed(8))); };
   const bp = invBasePres(p);
   const canon = invBaseUnit(p);
   const isWeighed = p.weighed === true;
@@ -738,7 +741,7 @@ function productForm(id) {
     const gain = () => Math.min(99.99, Math.max(0, parseFloat(pcGain.value) || 0));
     const setGain = (g) => { pcGain.value = (Math.min(99.99, Math.max(0, g))).toFixed(2); };
     // Precio resuelto de la presentación base (todo)
-    const baseResolved = () => rows[0].tipo === 'AUTO' ? cost() * (1 + gain() / 100) * contenido() : (parseFloat(rows[0].precio) || 0);
+    const baseResolved = () => rows[0].tipo === 'AUTO' ? cost() * (1 + gain() / 100) * contenido() : pnum(rows[0].precio);
     const rowAuto = (equiv) => (baseResolved() / contenido()) * equiv;
 
     const showEquiv = () => { $('#pcEquiv').textContent = '1 ' + (pcBaseUnit.value || '?') + ' = ' + contenido() + ' ' + (pcCanon.value || '?'); };
@@ -749,32 +752,33 @@ function productForm(id) {
         const isBase = idx === 0;
         const auto = r.tipo === 'AUTO';
         const unVal = isBase ? (pcBaseUnit.value || 'Unidad') : r.unidad;
-        const eqVal = isBase ? contenido() : (parseFloat(r.equiv) || 1);
-        const priceVal = isBase ? (auto ? baseResolved() : (parseFloat(r.precio) || 0)) : (auto ? rowAuto(eqVal) : (parseFloat(r.precio) || 0));
+        const eqVal = isBase ? contenido() : pnum(r.equiv);
+        const priceVal = isBase ? (auto ? baseResolved() : pnum(r.precio)) : (auto ? rowAuto(eqVal) : pnum(r.precio));
         const div = document.createElement('div');
         div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;align-items:center';
         div.innerHTML = `
           <select class="pr-un" data-i="${idx}" ${isBase ? 'disabled' : ''}>${uOpt(unVal)}</select>
-          <input type="number" class="pr-eq" step="0.001" min="0.001" value="${eqVal}" data-i="${idx}" ${isBase ? 'disabled' : ''} />
-          <input type="number" class="pr-pr" step="0.0001" min="0" value="${priceVal.toFixed(4)}" data-i="${idx}" ${auto ? 'readonly style="background:#f3f4f6"' : 'style="width:100%;box-sizing:border-box"'}/>
+          <input type="text" inputmode="decimal" class="pr-eq" value="${fmtDec(eqVal)}" data-i="${idx}" placeholder="0.00" ${isBase ? 'disabled' : ''} />
+          <input type="text" inputmode="decimal" class="pr-pr" value="${auto ? priceVal.toFixed(4) : fmtDec(priceVal)}" data-i="${idx}" placeholder="0.0000" ${auto ? 'readonly style="background:#f3f4f6"' : ''}/>
           <select class="pr-tp" data-i="${idx}"><option value="MANUAL" ${!auto ? 'selected' : ''}>Manual</option><option value="AUTO" ${auto ? 'selected' : ''}>Automático</option></select>
           <label style="font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px${isBase ? ';opacity:.6' : ''}"><input type="checkbox" class="pr-act" data-i="${idx}" ${r.activa ? 'checked' : ''} ${isBase ? 'disabled' : ''}/> Activa</label>
           <button type="button" class="btn sm danger pr-del" data-i="${idx}" title="Quitar" ${isBase ? 'disabled style="visibility:hidden"' : ''}>&times;</button>`;
         box.appendChild(div);
       });
       box.querySelectorAll('.pr-un').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; r.unidad = el.value; }));
-      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = parseFloat(el.value) || 1; if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = rowAuto(r.equiv).toFixed(4); } }));
-      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('input', () => {
+      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = pnum(el.value); if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = rowAuto(r.equiv).toFixed(4); } }));
+      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return; r.precio = pnum(el.value); }));
+      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('change', () => {
         const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return;
-        r.precio = parseFloat(el.value) || 0;
-        const c = cost(); if (c > 0) { const e = el.closest('div').querySelector('.pr-eq') ? (parseFloat(el.closest('div').querySelector('.pr-eq').value) || 1) : (containedFor(r)); setGain((((r.precio / e) - c) / c) * 100); paintRows(); }
+        r.precio = pnum(el.value);
+        const c = cost(); if (c > 0) { const eqIn = el.closest('div').querySelector('.pr-eq'); const e = eqIn ? (pnum(eqIn.value) || 1) : contenido(); setGain((((r.precio / e) - c) / c) * 100); paintRows(); }
       }));
       box.querySelectorAll('.pr-tp').forEach(el => el.addEventListener('change', () => {
         const r = rows[+el.dataset.i]; r.tipo = el.value;
         const rowDiv = el.closest('div'); const pIn = rowDiv.querySelector('.pr-pr'); const eq = rowDiv.querySelector('.pr-eq');
-        const eqv = isBase0(el) ? contenido() : (parseFloat(eq.value) || 1);
+        const eqv = isBase0(el) ? contenido() : pnum(eq.value);
         if (r.tipo === 'AUTO') { pIn.readOnly = true; pIn.style.background = '#f3f4f6'; pIn.value = ((isBase0(el) ? baseResolved() : rowAuto(eqv))).toFixed(4); }
-        else { pIn.readOnly = false; pIn.style.background = ''; pIn.value = r.precio || 0; }
+        else { pIn.readOnly = false; pIn.style.background = ''; pIn.value = fmtDec(r.precio); }
       }));
       box.querySelectorAll('.pr-act').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; if (!r.base) r.activa = el.checked; }));
       box.querySelectorAll('.pr-del').forEach(el => el.addEventListener('click', () => { if (rows[+el.dataset.i].base) return; rows.splice(+el.dataset.i, 1); paintRows(); }));
@@ -801,9 +805,9 @@ function productForm(id) {
       const baseRes = baseResolved();
       const invPres = rows.map((r, i) => {
         const isB = i === 0;
-        const eq = isB ? cnt : (parseFloat(r.equiv) || 1);
+        const eq = isB ? cnt : pnum(r.equiv);
         const unidad = isB ? unidadBase : r.unidad;
-        const precio = r.tipo === 'AUTO' ? (isB ? baseRes : rowAuto(eq)) : (parseFloat(r.precio) || 0);
+        const precio = r.tipo === 'AUTO' ? (isB ? baseRes : rowAuto(eq)) : pnum(r.precio);
         return { unidad, equiv: eq, precio, tipo: r.tipo, activa: r.activa !== false, base: isB };
       }).filter(r => r.equiv > 0 && r.unidad);
       const prod = {
