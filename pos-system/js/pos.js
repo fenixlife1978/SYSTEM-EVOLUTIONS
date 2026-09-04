@@ -232,9 +232,9 @@ function posSearch() {
               <tr>
                 <td><code>${p.code}</code></td>
                 <td>${p.name}</td>
-                <td class="num">${fmt.money(p.price)}</td>
+                <td class="num">${fmt.moneyDyn(p.price)}</td>
                 <td class="num">${fmt.bs(p.price)}</td>
-                <td class="num" title="${invStock(p)} ${invBaseUnit(p)}">${invBreakdown(p, invStock(p))}</td>
+                <td class="num" title="${invStock(p)} ${unitAbbr(invBaseUnit(p), invStock(p))}">${invBreakdown(p, invStock(p))}</td>
                 <td><button class="btn sm primary" data-add="${p.id}">Agregar</button></td>
               </tr>`).join('')}
           </tbody></table>`;
@@ -515,8 +515,11 @@ function posCheckout() {
   openModal({ title: 'F8 — Cobrar', body: html, footer, size: 'modal-lg' });
   setTimeout(() => {
     const calc = () => {
-      const r = parseFloat($('#payRecv').value) || 0;
-      const c = Math.max(0, r - subtotal);
+      const r = fmt.rnd(parseFloat($('#payRecv').value) || 0, 2);
+      const due = fmt.rnd(subtotal, 2);
+      // Comparación por centavos (enteros) para evitar ruido de punto flotante
+      const diffCents = Math.round(r * 100) - Math.round(due * 100);
+      const c = diffCents <= 0 ? 0 : (diffCents / 100);
       $('#payChange').value = fmt.num(c);
     };
     calc();
@@ -1172,7 +1175,7 @@ function posPrices() {
       list.forEach(canonicalizeProduct);
       $('#prRes').innerHTML = list.length === 0 ? '<div class="empty-state" style="padding:14px">Sin resultados</div>' :
         `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Descripción</th><th class="num">Precio USD</th><th class="num">Precio Bs.</th><th class="num">Stock</th></tr></thead><tbody>
-          ${list.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td class="num">${fmt.money(invUnitPrice(p))}</td><td class="num">${fmt.bs(invUnitPrice(p))}</td><td class="num">${invStock(p)} ${invBaseUnit(p)}</td></tr>`).join('')}
+          ${list.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td><td class="num">${fmt.bs(invUnitPrice(p))}</td><td class="num">${invStock(p)} ${unitAbbr(invBaseUnit(p), invStock(p))}</td></tr>`).join('')}
         </tbody></table>`;
     });
     in_.dispatchEvent(new Event('input'));
@@ -1229,8 +1232,8 @@ function openPickCanonical(p, views) {
       <div style="display:flex;align-items:center;gap:10px;border:1px solid #e2e6ec;border-radius:8px;padding:10px 12px;background:#fff">
         <div style="flex:1">
           <b>${v.unidad}</b>
-          <div style="color:#15803d;font-weight:800;font-family:Consolas,monospace">${fmt.money(v.precio)}</div>
-          <div style="font-size:11px;color:#6b7280">${v.equiv} ${invBaseUnit(p)} por unidad vendida${v.equiv === 1 ? ' · precio unitario' : ''}</div>
+          <div style="color:#15803d;font-weight:800;font-family:Consolas,monospace">${fmt.moneyDyn(v.precio)}</div>
+          <div style="font-size:11px;color:#6b7280">${fmtNumStock(v.equiv)} ${unitAbbr(invBaseUnit(p), v.equiv)} por unidad vendida${v.equiv === 1 ? ' · precio unitario' : ''}</div>
         </div>
         <button class="btn primary" data-pick="${i}">${ico('check')} Vender</button>
       </div>`).join('');
@@ -1238,7 +1241,7 @@ function openPickCanonical(p, views) {
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px">
       <span style="color:#166534;font-weight:600">Disponible:</span>
       <b style="color:#15803d">${invString(p)}</b>
-      <span style="color:#6b7280">(${fmtNumStock(invStock(p))} ${invBaseUnit(p)})</span>
+      <span style="color:#6b7280">(${fmtNumStock(invStock(p))} ${unitAbbr(invBaseUnit(p), invStock(p))})</span>
     </div>
     <p style="color:#374151;font-weight:600;margin:0 0 8px">Seleccione la presentación para esta venta</p>
     <div style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto">${cards}</div>`;
@@ -1258,13 +1261,13 @@ function openQtyCanonical(p, view) {
   const html = `
     <div class="form-grid">
       <div class="field span-2"><label>Producto</label><input value="${p.name}" disabled style="background:#f3f4f6" /></div>
-      <div class="field"><label>Presentación</label><input value="${view.unidad} · ${fmt.money(view.precio)}" disabled style="background:#f3f4f6" /></div>
-      <div class="field"><label>Cantidad</label><input type="number" step="${step}" min="${min}" id="qcQty" value="1" autofocus /></div>
+      <div class="field"><label>Presentación</label><input value="${view.unidad} · ${fmt.moneyDyn(view.precio)}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Cantidad</label><input type="text" inputmode="decimal" id="qcQty" value="1" autofocus /></div>
     </div>
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:8px">
       <div style="font-size:11px;color:#6b7280">Subtotal</div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <b id="qcSub" style="font-size:22px;color:#15803d;font-family:Consolas,monospace">${fmt.money(view.precio)}</b>
+        <b id="qcSub" style="font-size:22px;color:#15803d;font-family:Consolas,monospace">${fmt.moneyDyn(view.precio)}</b>
         <span id="qcConsume" style="font-size:11px;color:#6b7280"></span>
       </div>
     </div>`;
@@ -1274,11 +1277,11 @@ function openQtyCanonical(p, view) {
   setTimeout(() => {
     const inp = $('#qcQty'); inp.focus(); inp.select();
     const calc = () => {
-      const q = parseFloat(inp.value) || 0;
+      const q = parseFloat(String(inp.value).replace(',', '.')) || 0;
       const subtotal = q * (view.precio || 0);
       const consume = q * (view.equiv || 1);
-      $('#qcSub').textContent = fmt.money(subtotal);
-      $('#qcConsume').textContent = 'Descuenta ' + fmtNumStock(consume) + ' ' + invBaseUnit(p);
+      $('#qcSub').textContent = fmt.moneyDyn(subtotal);
+      $('#qcConsume').textContent = 'Descuenta ' + fmtNumStock(consume) + ' ' + unitAbbr(invBaseUnit(p), consume);
       return { q, consume };
     };
     inp.addEventListener('input', calc);
@@ -1290,7 +1293,7 @@ function openQtyCanonical(p, view) {
       if (!chk.ok) { toast(chk.message, 'warn', 3200); return; }
       addCanonicalLine(p, view, q);
       closeModal();
-      const consTx = fmtNumStock(consume) + ' ' + invBaseUnit(p);
+      const consTx = fmtNumStock(consume) + ' ' + unitAbbr(invBaseUnit(p), consume);
       toast('"' + p.name + '" · ' + view.unidad + ' × ' + fmtNumStock(q) + ' agregado (' + consTx + ')', 'success');
     });
   }, 60);

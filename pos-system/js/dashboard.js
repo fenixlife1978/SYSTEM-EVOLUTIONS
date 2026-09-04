@@ -179,7 +179,7 @@ function renderTopProducts() {
           <small>${p.code} · ${p.category}</small>
         </div>
         <div style="text-align:right">
-          <b>${fmt.money(invUnitPrice(p))}</b>
+          <b>${fmt.moneyDyn(invUnitPrice(p))}</b>
           <small style="display:block;color:#6b7280">${invBreakdown(p, invStock(p))}</small>
         </div>
       </div>`).join('')}

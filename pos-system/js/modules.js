@@ -347,7 +347,7 @@ function paintInventory() {
       <td>${p.category}</td>
       <td>${invBaseUnit(p)}${p.weighed ? ' (peso)' : ''}</td>
       <td class="num" title="${fmtNumK(invStock(p))} ${invBaseUnit(p)}">${invBreakdown(p, invStock(p))}</td>
-      <td class="num">${fmt.money(invUnitPrice(p))}</td>
+      <td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td>
       <td class="num">${fmt.money(invStock(p) * invUnitPrice(p))}</td>
       <td class="actions-cell">
         <button class="btn sm" data-edit="${p.id}">Editar</button>
@@ -444,7 +444,7 @@ function showKardex(pid) {
       <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Entradas</div><b style="color:#166534">${fmtNumK(sumE)} ${canonU}</b></div>
       <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Salidas</div><b style="color:#b91c1c">${fmtNumK(sumS)} ${canonU}</b></div>
       <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Costo unitario</div><b>${fmt.money(p.cost || 0)}</b></div>
-      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Precio unitario</div><b>${fmt.money(invUnitPrice(p))}</b></div>
+      <div style="border:1px solid #e2e6ec;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#6b7280">Precio unitario</div><b>${fmt.moneyDyn(invUnitPrice(p))}</b></div>
     </div>
     <div style="max-height:320px;overflow:auto;border:1px solid #e2e6ec;border-radius:8px">
       <table class="dt" style="width:100%;margin:0">
@@ -759,14 +759,14 @@ function productForm(id) {
         div.innerHTML = `
           <select class="pr-un" data-i="${idx}" ${isBase ? 'disabled' : ''}>${uOpt(unVal)}</select>
           <input type="text" inputmode="decimal" class="pr-eq" value="${fmtDec(eqVal)}" data-i="${idx}" placeholder="0.00" ${isBase ? 'disabled' : ''} />
-          <input type="text" inputmode="decimal" class="pr-pr" value="${auto ? priceVal.toFixed(4) : fmtDec(priceVal)}" data-i="${idx}" placeholder="0.0000" ${auto ? 'readonly style="background:#f3f4f6"' : ''}/>
+          <input type="text" inputmode="decimal" class="pr-pr" value="${fmtDec(priceVal)}" data-i="${idx}" placeholder="0.000000" ${auto ? 'readonly style="background:#f3f4f6"' : ''}/>
           <select class="pr-tp" data-i="${idx}"><option value="MANUAL" ${!auto ? 'selected' : ''}>Manual</option><option value="AUTO" ${auto ? 'selected' : ''}>Automático</option></select>
           <label style="font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px${isBase ? ';opacity:.6' : ''}"><input type="checkbox" class="pr-act" data-i="${idx}" ${r.activa ? 'checked' : ''} ${isBase ? 'disabled' : ''}/> Activa</label>
           <button type="button" class="btn sm danger pr-del" data-i="${idx}" title="Quitar" ${isBase ? 'disabled style="visibility:hidden"' : ''}>&times;</button>`;
         box.appendChild(div);
       });
       box.querySelectorAll('.pr-un').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; r.unidad = el.value; }));
-      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = pnum(el.value); if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = rowAuto(r.equiv).toFixed(4); } }));
+      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = pnum(el.value); if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = fmtDec(rowAuto(r.equiv)); } }));
       box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return; r.precio = pnum(el.value); }));
       box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('change', () => {
         const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return;
@@ -777,7 +777,7 @@ function productForm(id) {
         const r = rows[+el.dataset.i]; r.tipo = el.value;
         const rowDiv = el.closest('div'); const pIn = rowDiv.querySelector('.pr-pr'); const eq = rowDiv.querySelector('.pr-eq');
         const eqv = isBase0(el) ? contenido() : pnum(eq.value);
-        if (r.tipo === 'AUTO') { pIn.readOnly = true; pIn.style.background = '#f3f4f6'; pIn.value = ((isBase0(el) ? baseResolved() : rowAuto(eqv))).toFixed(4); }
+        if (r.tipo === 'AUTO') { pIn.readOnly = true; pIn.style.background = '#f3f4f6'; pIn.value = fmtDec(isBase0(el) ? baseResolved() : rowAuto(eqv)); }
         else { pIn.readOnly = false; pIn.style.background = ''; pIn.value = fmtDec(r.precio); }
       }));
       box.querySelectorAll('.pr-act').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; if (!r.base) r.activa = el.checked; }));
@@ -1695,7 +1695,7 @@ function reportInventory() {
     <div class="dt-wrap" style="max-height:400px;overflow:auto">
       <table class="dt">
         <thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Stock</th><th class="num">Precio/unidad</th><th class="num">Valor</th></tr></thead>
-        <tbody>${plist.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td>${invBreakdown(p, invStock(p))} <small>(${invStock(p)} ${invBaseUnit(p)})</small></td><td class="num">${fmt.money(invUnitPrice(p))}</td><td class="num">${fmt.money(invStock(p) * invUnitPrice(p))}</td></tr>`).join('')}</tbody>
+        <tbody>${plist.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td>${p.category}</td><td>${invBreakdown(p, invStock(p))} <small>(${invStock(p)} ${invBaseUnit(p)})</small></td><td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td><td class="num">${fmt.money(invStock(p) * invUnitPrice(p))}</td></tr>`).join('')}</tbody>
       </table>
     </div>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
@@ -1756,7 +1756,7 @@ function reportTop() {
   openModal({ title: 'Top 10 productos', body: `
     <table class="dt" style="width:100%">
       <thead><tr><th>#</th><th>Producto</th><th>Categoría</th><th>Stock</th><th class="num">Precio/unidad</th></tr></thead>
-      <tbody>${top.map((p, i) => `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.category}</td><td>${invStock(p)} ${invBaseUnit(p)}</td><td class="num">${fmt.money(invUnitPrice(p))}</td></tr>`).join('')}</tbody>
+      <tbody>${top.map((p, i) => `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.category}</td><td>${invStock(p)} ${invBaseUnit(p)}</td><td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td></tr>`).join('')}</tbody>
     </table>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>` });
 }

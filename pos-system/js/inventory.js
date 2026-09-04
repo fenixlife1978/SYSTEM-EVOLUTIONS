@@ -149,17 +149,27 @@ function invUnitPrice(p) {
   return Number(b.precio) / Math.max(1, Number(b.contenido) || 1);
 }
 
-/* Presentaciones de venta normalizadas (garantiza activas con precio resuelto). */
+/* Presentaciones de venta normalizadas (garantiza activas con precio resuelto).
+   Se añade SIEMPRE la presentación base sintética y se evitan duplicados de la
+   base almacenada en p.invPres (base:true o unidad+equiv idénticos). */
 function invPreset(p) {
   const base = invBasePres(p);
+  const bUnidad = String((base && base.unidad) || '').toLowerCase();
+  const bCont = Number(base && base.contenido) || 0;
+  const seen = new Set();
   const arr = [];
-  if (base && Number(base.contenido || 0) > 0) {
-    arr.push({ id: 0, unidad: base.unidad || 'Unidad', equiv: Number(base.contenido) || 1, precio: Number(base.precio) || 0, tipo: 'MANUAL', activa: true, base: true });
+  if (base && bCont > 0) {
+    arr.push({ id: 0, unidad: base.unidad || 'Unidad', equiv: bCont, precio: Number(base.precio) || 0, tipo: 'MANUAL', activa: true, base: true });
+    seen.add((bUnidad || '') + '|' + bCont);
   }
   (p && Array.isArray(p.invPres) ? p.invPres : []).forEach((x, i) => {
     const eq = Number(x.equiv); if (!(eq > 0)) return;
-    const isBase = String(x.unidad).toLowerCase() === String(base.unidad || '').toLowerCase();
-    arr.push({ id: isBase ? 0 : (x.id || (i + 1)), unidad: x.unidad, equiv: eq, precio: Number(x.precio) || 0, tipo: (x.tipo || 'MANUAL').toUpperCase(), activa: x.activa !== false, base: !!isBase });
+    const isBase = x.base === true || (String(x.unidad).toLowerCase() === bUnidad && Math.abs(eq - bCont) < 1e-9);
+    if (isBase) return; // la base ya se añadió sintéticamente
+    const k = String(x.unidad || '').toLowerCase() + '|' + eq;
+    if (seen.has(k)) return;
+    seen.add(k);
+    arr.push({ id: x.id || (i + 1), unidad: x.unidad, equiv: eq, precio: Number(x.precio) || 0, tipo: (x.tipo || 'MANUAL').toUpperCase(), activa: x.activa !== false, base: false });
   });
   return arr;
 }
@@ -185,7 +195,26 @@ function invPresByName(p, name) {
   return invPreset(p).find(x => String(x.unidad || '').toLowerCase() === n) || null;
 }
 
-/* Descompone stock canónico en "N PresentaciónMaestra + resto canónico". */
+/* Abreviaciones de unidades de medida (con plural cuando corresponde). */
+const UNIT_ABBR = {
+  'unidad': 'Und', 'caja': 'Cja', 'paquete': 'Pqte', 'bulto': 'Bulto', 'saco': 'Saco',
+  'envase': 'Env', 'botella': 'Bot', 'lata': 'Lata', 'six pack': 'Six', 'docena': 'Doc',
+  'carton': 'Cart', 'cajetilla': 'Cjet', 'par': 'Par', 'rollo': 'Rollo',
+  'kilogramo': 'Kg', 'gramo': 'g', 'litro': 'Lt', 'mililitro': 'ml',
+  'metro': 'm', 'centimetro': 'cm', 'centímetro': 'cm'
+};
+const UNIT_INVARIANT = { 'ml': 1, 'g': 1, 'm': 1, 'cm': 1, 'kg': 1 };
+/* Devuelve la abreviatura de una unidad dado su conteo (pluraliza contables). */
+function unitAbbr(name, count) {
+  const base = String(name == null ? '' : name).trim() || 'Und';
+  const ab = UNIT_ABBR[base.toLowerCase()] || base;
+  if (Number(count) !== 1) return UNIT_INVARIANT[ab.toLowerCase()] ? ab : (ab + 's');
+  return ab;
+}
+/* Abreviatura en plural (para encabezados/títulos donde no importa el conteo). */
+function unitAbbrPlural(name) { return unitAbbr(name, 2); }
+
+/* Descompone stock canónico en "N PresentaciónMaestra + resto canónico" (con abreviaciones). */
 function invBreakdown(p, stockBase) {
   const base = invBasePres(p);
   const can = invBaseUnit(p);
@@ -194,10 +223,10 @@ function invBreakdown(p, stockBase) {
   const contenido = Number(base.contenido) || 1;
   if (contenido > 1) {
     const whole = Math.floor(rem / contenido);
-    if (whole !== 0) terms.push(whole + ' ' + base.unidad);
+    if (whole !== 0) terms.push(fmtNumberStock(whole) + ' ' + unitAbbr(base.unidad, whole));
     rem = rem - whole * contenido;
   }
-  if (rem !== 0 || terms.length === 0) terms.push(fmtNumberStock(rem) + ' ' + can);
+  if (rem !== 0 || terms.length === 0) terms.push(fmtNumberStock(rem) + ' ' + unitAbbr(can, rem));
   return terms.join(' + ');
 }
 function invString(p) { return invBreakdown(p, invStock(p)); }

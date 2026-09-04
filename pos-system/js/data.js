@@ -122,6 +122,20 @@ const fmt = {
     return '$ ' + s;
   },
   num(v) { return (Number(v) || 0).toFixed(2); },
+  // Redondeo de moneda sin ruido de punto flotante (devuelve número ya redondeado a d decimales).
+  rnd(v, d) {
+    const n = Number(v) || 0; const p = Math.pow(10, d == null ? 2 : d);
+    return Math.round((n + Number.EPSILON) * p) / p;
+  },
+  // Moneda con hasta 6 decimales recortados (para precios por unidad muy pequeños, p. ej. ml).
+  moneyDyn(v) {
+    const n = Number(v) || 0;
+    let s = n.toFixed(6).replace(/0+$/, '');
+    if (s.charAt(s.length - 1) === '.') s = s.slice(0, -1);
+    if (!s.includes('.')) s += '.00';
+    else if (s.split('.')[1].length < 2) s = n.toFixed(2);
+    return '$ ' + s;
+  },
   usdRate() { return Number(db.settings?.pos?.usdRate) || 36; },
   // Equivalencia en Bolívares (moneda secundaria): USD × tasa
   bs(v) {
