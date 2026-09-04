@@ -417,16 +417,22 @@ function applyRefund(saleId, qtyArray, methodKey, overrideUsd) {
   });
   db.accounting.unshift({
     id: db.accounting.length + 1, date: veDate(), type: 'egreso', category: 'Reembolsos',
-    description: `Reembolso ${s.number} (${full ? 'total' : 'parcial'})`, amount: totalUsd, ref: 'R-' + s.number
+    description: `Reembolso ${s.number} (${full ? 'total' : 'parcial'}) · ${METHOD_LBL(methodKey)}`,
+    amount: totalUsd, ref: 'R-' + s.number
   });
-  if (full) { const i = db.sales.findIndex(x => x.id === saleId); if (i >= 0) db.sales[i].status = 'refunded'; }
+  // La venta queda en solo lectura: total → refunded; parcial → bloqueada a más acciones
+  const i = db.sales.findIndex(x => x.id === saleId);
+  if (i >= 0) {
+    if (full) db.sales[i].status = 'refunded';
+    else { db.sales[i].refundedPartial = true; db.sales[i].status = 'paid'; }
+  }
   DB.save(db);
   return { totalUsd, full, count: chosen.length };
 }
 
 /* F6 — Anular (reembolso/venta anulada por completo) */
 function posReturn() {
-  const eligible = db.sales.filter(s => s.status !== 'refunded' && s.status !== 'refunded');
+  const eligible = db.sales.filter(s => s.status !== 'refunded' && !s.refundedPartial);
   if (!eligible.length) { toast('No hay ventas por anular', 'warn'); return; }
   const saleOpts = () => eligible.map(s => `<option value="${s.id}">${s.number} — ${s.client} — ${fmt.money(s.total)}</option>`).join('');
   const body = `
@@ -918,7 +924,7 @@ function posDaySales() {
               <td>${s.client}</td>
               <td class="num">${s.items}</td>
               <td class="num"><b>${fmt.money(s.total)}</b></td>
-              <td>${s.status === 'credit' ? '<span class="pill yellow">Crédito</span>' : s.status === 'refunded' ? '<span class="pill red">Reembolsada</span>' : '<span class="pill green">Pagada</span>'}</td>
+              <td>${s.status === 'credit' ? '<span class="pill yellow">Crédito</span>' : s.status === 'refunded' ? '<span class="pill red">Reembolsada</span>' : s.refundedPartial ? '<span class="pill yellow">Parcial reemb.</span>' : '<span class="pill green">Pagada</span>'}</td>
               <td class="num"><button class="row-eye" data-sale="${s.id}" title="Ver detalle / imprimir">${ico('eye')}</button></td>
             </tr>`).join('')}</tbody>
         </table>`;
@@ -1222,7 +1228,7 @@ function posLastDetail(id) {
   const s = db.sales.find(x => x.id === id);
   if (!s) return;
   const cli = db.clients.find(c => c.name === s.client);
-  const statePill = s.status === 'credit' ? '<span class="pill yellow">Crédito</span>' : s.status === 'refunded' ? '<span class="pill red">Reembolsada</span>' : '<span class="pill green">Pagada</span>';
+  const statePill = s.status === 'credit' ? '<span class="pill yellow">Crédito</span>' : s.status === 'refunded' ? '<span class="pill red">Reembolsada</span>' : s.refundedPartial ? '<span class="pill yellow">Parcial reemb.</span>' : '<span class="pill green">Pagada</span>';
   const rate = Number(s.rate) || fmt.usdRate();
   const linesArr = Array.isArray(s.lines) ? s.lines : [];
   const itemsHtml = linesArr.length
@@ -1369,7 +1375,7 @@ function posSuspend() { posPending(); }
 
 /* F10 — Reembolso (búsqueda de venta previa) */
 function posRefund() {
-  const eligible = db.sales.filter(s => s.status !== 'refunded');
+  const eligible = db.sales.filter(s => s.status !== 'refunded' && !s.refundedPartial);
   if (!eligible.length) { toast('No hay ventas reembolsables', 'warn'); return; }
   const body = `
     <div class="field"><label>Venta a reembolsar</label>
