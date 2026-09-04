@@ -136,6 +136,15 @@ const fmt = {
     else if (s.split('.')[1].length < 2) s = n.toFixed(2);
     return '$ ' + s;
   },
+  // Precios de fracción en el carrito: hasta 5 decimales (sin redondear a 2).
+  frac(v) {
+    const n = Number(v) || 0;
+    let s = n.toFixed(5).replace(/0+$/, '');
+    if (s.charAt(s.length - 1) === '.') s = s.slice(0, -1);
+    if (!s.includes('.')) s += '.00';
+    else if (s.split('.')[1].length < 2) s = n.toFixed(2);
+    return '$ ' + s;
+  },
   usdRate() { return Number(db.settings?.pos?.usdRate) || 36; },
   // Equivalencia en Bolívares (moneda secundaria): USD × tasa
   bs(v) {
