@@ -166,29 +166,31 @@ const fmt = {
   }
 };
 
-/* ---------- Fecha / hora local de Venezuela (UTC-4) ---------- */
-const VE_TZ = 'America/Caracas';
+/* ---------- Fecha / hora local de Venezuela (UTC-4, sin horario de verano) ---------- */
+const VE_OFFSET_H = -4;
 function veParts(t) {
-  t = t || new Date();
-  try {
-    const f = new Intl.DateTimeFormat('en-CA', { timeZone: VE_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
-    const o = {};
-    f.formatToParts(t).forEach(x => { if (x.type !== 'literal') o[x.type] = x.value; });
-    return o;
-  } catch (e) {
-    const d = new Date(t);
-    const p = (n) => String(n).padStart(2, '0');
-    return { year: String(d.getFullYear()), month: p(d.getMonth() + 1), day: p(d.getDate()), hour: p(d.getHours()), minute: p(d.getMinutes()), second: p(d.getSeconds()) };
-  }
+  const d = t ? new Date(t) : new Date();
+  // Correr el instante a UTC-4 y leer sus componentes UTC = hora de pared de Venezuela.
+  const v = new Date(d.getTime() + VE_OFFSET_H * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return { year: String(v.getUTCFullYear()), month: p(v.getUTCMonth() + 1), day: p(v.getUTCDate()), hour: p(v.getUTCHours()), minute: p(v.getUTCMinutes()), second: p(v.getUTCSeconds()) };
 }
 function veDate(t) { const o = veParts(t); return o.year + '-' + o.month + '-' + o.day; }
 function veTime(t) { const o = veParts(t); return o.hour + ':' + o.minute; }
 function veStamp(t) { return veDate(t) + ' ' + veTime(t); }
-/* Fecha/hora legible en Venezuela (para tickets/reportes). */
+const VE_MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const VE_DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 function veLong(t) {
-  t = t || new Date();
-  try { return new Intl.DateTimeFormat('es-VE', { timeZone: VE_TZ, weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).format(t); }
-  catch (e) { return veStamp(t); }
+  const o = veParts(t); const dayName = VE_DIAS[new Date(o.year, o.month - 1, o.day).getDay()];
+  return `${dayName}, ${Number(o.day)} de ${VE_MESES[Number(o.month) - 1]} de ${o.year}, ${veHm12(o.hour + ':' + o.minute)}`;
+}
+/* Convierte "HH:MM" (o un sello "YYYY-MM-DD HH:MM") a "h:mm a. m./p. m.". */
+function veHm12(stamp) {
+  const m = /(\d{2}):(\d{2})/.exec(String(stamp == null ? '' : stamp));
+  if (!m) return '';
+  let h = +m[1]; const mm = m[2]; const ap = h >= 12 ? 'p. m.' : 'a. m.';
+  h = h % 12 || 12;
+  return h + ':' + mm + ' ' + ap;
 }
 /* Devuelve un Date con la hora de Venezuela (para cálculos de vencimiento locales). */
 function veNowDate() {

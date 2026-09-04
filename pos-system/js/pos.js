@@ -422,7 +422,7 @@ function getReceiptLines() {
   lns.push(padc(c.website));
   lns.push('');
   lns.push(padlr('Recibo:', ticket.number));
-  lns.push(padlr('Fecha:', veStamp()));
+  lns.push(padlr('Fecha:', veDate() + ' ' + veHm12(veTime())));
   lns.push(padlr('Cliente:', ticket.customer.name + ' (' + ticket.customer.code + ')'));
   lns.push('');
   lns.push(sep);
@@ -749,7 +749,7 @@ function posDaySales() {
           <tbody>${list.map(s => `
             <tr>
               <td><code>${s.number}</code></td>
-              <td>${String(s.date).length > 10 ? String(s.date).slice(11) : String(s.date).slice(0, 10)}</td>
+              <td>${String(s.date).length > 10 ? veHm12(String(s.date).slice(11)) : String(s.date).slice(0, 10)}</td>
               <td>${s.client}</td>
               <td class="num">${s.items}</td>
               <td class="num"><b>${fmt.money(s.total)}</b></td>
@@ -1076,7 +1076,7 @@ function posLastDetail(id) {
   const html = `
     <div class="form-grid" style="margin-bottom:12px">
       <div class="field"><label>Recibo N°</label><input value="${s.number}" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
-      <div class="field"><label>Fecha (Venezuela)</label><input value="${s.date}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Fecha (Venezuela)</label><input value="${String(s.date).length > 10 ? (String(s.date).slice(0, 10) + ' · ' + veHm12(String(s.date).slice(11))) : s.date}" disabled style="background:#f3f4f6" /></div>
       <div class="field"><label>Cliente</label><input value="${s.client}" disabled style="background:#f3f4f6" /></div>
       <div class="field"><label>RIF / CI</label><input value="${cli ? cli.taxId : ''}" disabled style="background:#f3f4f6" /></div>
       <div class="field"><label>Tasa BCV utilizada</label><input value="${fmt.num(rate)} Bs/USD" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
@@ -1116,7 +1116,7 @@ function buildSaleReceiptHtml(s) {
   lns.push(padc('POSsystem Evolution'));
   lns.push(sep);
   lns.push(padlr('Recibo N°:', s.number));
-  lns.push(padlr('Fecha:', s.date));
+  lns.push(padlr('Fecha:', String(s.date).length > 10 ? (String(s.date).slice(0, 10) + ' ' + veHm12(String(s.date).slice(11))) : s.date));
   lns.push('Cliente: ' + s.client);
   if (cli && cli.taxId) lns.push('RIF/CI: ' + cli.taxId);
   lns.push(sep);
