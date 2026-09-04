@@ -36,6 +36,7 @@ function renderPOS() {
       const v = el.textContent.trim();
       if (el.id === 'rcptCustomerCode') ticket.customer.code = v;
       if (el.id === 'rcptCustomerName') ticket.customer.name = v;
+      if (el.id === 'rcptCustomerTax') ticket.customer.taxId = v;
       if (el.id === 'rcptCustomerAddr') ticket.customer.address = v;
       DB.save(db);
     });
@@ -295,6 +296,7 @@ function posLink() {
             ticket.customer = c;
             $('#rcptCustomerCode').textContent = c.code;
             $('#rcptCustomerName').textContent = c.name;
+            $('#rcptCustomerTax').textContent = c.taxId || '';
             $('#rcptCustomerAddr').textContent = c.address || '';
             renderCustomerInfo();
             if ((Number(c.balance) || 0) > 0) {
@@ -494,6 +496,7 @@ function resumePending(id) {
   if (p.number) ticket.number = p.number;
   $('#rcptCustomerCode').textContent = cli.code;
   $('#rcptCustomerName').textContent = cli.name;
+  $('#rcptCustomerTax').textContent = cli.taxId || '';
   $('#rcptCustomerAddr').textContent = cli.address || '';
   $('#rcptNumber').textContent = ticket.number;
   list.splice(idx, 1);
@@ -807,6 +810,7 @@ function resetTicket() {
   ticket.number = '0100' + String(db.settings.invoice.nextNumber).padStart(4, '0');
   $('#rcptCustomerCode').textContent = ticket.customer.code;
   $('#rcptCustomerName').textContent = ticket.customer.name;
+  $('#rcptCustomerTax').textContent = ticket.customer.taxId || '';
   $('#rcptCustomerAddr').textContent = ticket.customer.address || '';
   $('#rcptNumber').textContent = ticket.number;
   if ($('#chkCredito')) $('#chkCredito').checked = false;

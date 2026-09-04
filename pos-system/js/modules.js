@@ -1093,8 +1093,19 @@ function paintClients() {
   }));
 }
 
+/* Código correlativo con prefijo: CLI-0000001, PROV-0000001, … */
+function nextCorrelative(prefix, list) {
+  let n = 0;
+  (Array.isArray(list) ? list : []).forEach(x => {
+    const m = /^([A-Za-z]+)-(\d+)$/.exec(String(x.code || ''));
+    if (m && m[1].toUpperCase() === prefix.toUpperCase()) { const v = parseInt(m[2], 10); if (v > n) n = v; }
+  });
+  return prefix.toUpperCase() + '-' + String(n + 1).padStart(7, '0');
+}
+
 function clientForm(id) {
   const c = id ? db.clients.find(x => x.id === id) : { code: '', name: '', taxId: '', address: '', phone: '', email: '', creditLimit: 0, balance: 0, status: 'active' };
+  if (!id) c.code = nextCorrelative('CLI', db.clients);
   const html = `
     <div class="form-grid">
       <div class="field"><label>Código</label><input id="clCode" value="${c.code}" /></div>
@@ -1196,6 +1207,7 @@ function paintSuppliers() {
 
 function supplierForm(id) {
   const s = id ? db.suppliers.find(x => x.id === id) : { code: '', name: '', contact: '', phone: '', email: '', address: '', taxId: '', balance: 0, status: 'active' };
+  if (!id) s.code = nextCorrelative('PROV', db.suppliers);
   const html = `
     <div class="form-grid">
       <div class="field"><label>Código</label><input id="spCode" value="${s.code}" /></div>
