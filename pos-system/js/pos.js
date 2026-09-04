@@ -229,13 +229,13 @@ function posSearch() {
       list.forEach(canonicalizeProduct);
       $('#psResults').innerHTML = list.length === 0
         ? `<div class="empty-state" style="padding:20px"><span class="ico">${ico('search')}</span>Sin resultados</div>`
-        : `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Descripción</th><th class="num">Precio USD</th><th class="num">Precio Bs.</th><th class="num">Stock</th><th></th></tr></thead><tbody>
+        : `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Descripción</th><th class="num">Precio pres. base</th><th class="num">Precio Bs.</th><th class="num">Stock</th><th></th></tr></thead><tbody>
             ${list.map(p => `
               <tr>
                 <td><code>${p.code}</code></td>
                 <td>${p.name}</td>
-                <td class="num">${fmt.moneyDyn(p.price)}</td>
-                <td class="num">${fmt.bs(p.price)}</td>
+                <td class="num">${fmt.moneyDyn(invDefaultPrice(p))} <small>${unitAbbrPlural(invBasePres(p).unidad)}</small></td>
+                <td class="num">${fmt.bs(invDefaultPrice(p))}</td>
                 <td class="num" title="${invStock(p)} ${unitAbbr(invBaseUnit(p), invStock(p))}">${invBreakdown(p, invStock(p))}</td>
                 <td><button class="btn sm primary" data-add="${p.id}">Agregar</button></td>
               </tr>`).join('')}
@@ -1176,8 +1176,8 @@ function posPrices() {
       const list = db.products.filter(p => !q || p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)).slice(0, 12);
       list.forEach(canonicalizeProduct);
       $('#prRes').innerHTML = list.length === 0 ? '<div class="empty-state" style="padding:14px">Sin resultados</div>' :
-        `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Descripción</th><th class="num">Precio USD</th><th class="num">Precio Bs.</th><th class="num">Stock</th></tr></thead><tbody>
-          ${list.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td><td class="num">${fmt.bs(invUnitPrice(p))}</td><td class="num">${invStock(p)} ${unitAbbr(invBaseUnit(p), invStock(p))}</td></tr>`).join('')}
+        `<table class="dt" style="width:100%"><thead><tr><th>Código</th><th>Descripción</th><th class="num">Precio pres. base</th><th class="num">Precio Bs.</th><th class="num">Stock</th></tr></thead><tbody>
+          ${list.map(p => `<tr><td><code>${p.code}</code></td><td>${p.name}</td><td class="num">${fmt.moneyDyn(invDefaultPrice(p))} <small>${unitAbbrPlural(invBasePres(p).unidad)}</small></td><td class="num">${fmt.bs(invDefaultPrice(p))}</td><td class="num">${invStock(p)} ${unitAbbr(invBaseUnit(p), invStock(p))}</td></tr>`).join('')}
         </tbody></table>`;
     });
     in_.dispatchEvent(new Event('input'));
