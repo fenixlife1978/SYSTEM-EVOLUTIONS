@@ -655,9 +655,13 @@ function finalizeSale(total, base, tax, payData) {
   closeModal();
   const changeTxt = sale.changeUSD > 0 ? ' · Vuelto: ' + fmt.money(sale.changeUSD) : '';
   toast(`Venta ${ticket.number} procesada: ${fmt.money(total)}${changeTxt}`, 'success', 3200);
+  resetTicket();
   // Impresión automática si está configurada (impresora térmica 80mm)
   if (db.settings.pos?.printAfterSale) { setTimeout(() => printHtml(receiptHtml), 250); }
-  resetTicket();
+  // El cursor vuelve a la columna de código para la siguiente venta (reintento tras imprimir,
+  // que puede robar el foco)
+  setTimeout(focusCodeInput, 60);
+  setTimeout(focusCodeInput, 900);
 }
 
 function resetTicket() {
