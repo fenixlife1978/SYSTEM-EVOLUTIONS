@@ -681,6 +681,7 @@ function productForm(id) {
   const isWeighed = p.weighed === true;
   const taxSel = p.taxed === false ? 'exento' : 'grabable';
   const gainVal = Math.min(99.99, Math.max(0, Number(p.margin != null ? p.margin : 30)));
+  const costBaseVal = (Number(p.cost) || 0) * (Number(bp.contenido) || 1);
   const existing = (Array.isArray(p.invPres) && p.invPres.length) ? p.invPres.map((x, i) => ({ i, unidad: x.unidad, equiv: x.equiv, precio: x.precio, tipo: (x.tipo || 'MANUAL'), activa: x.activa !== false, base: !!x.base })) : [];
   const exBase = existing.find(x => x.base);
   const baseRow = { unidad: bp.unidad || 'Unidad', equiv: bp.contenido || 1, precio: Number(bp.precio) || 0, tipo: (exBase ? exBase.tipo : 'MANUAL'), activa: true, base: true };
@@ -724,7 +725,8 @@ function productForm(id) {
         <div class="field"><label>Stock (en unidad canónica)</label><input type="number" step="0.001" min="0" id="pcStock" value="${Number(p.stockBase) || 0}" /></div>
         <div class="field"><label>Stock mínimo</label><input type="number" step="0.001" min="0" id="pcStockMin" value="${Number(p.stockMinimo) || 0}" /></div>
         <div class="field"><label>Stock máximo</label><input type="number" step="0.001" min="0" id="pcStockMax" value="${Number(p.stockMaximo) || 0}" /></div>
-        <div class="field"><label>Costo (USD por unidad canónica)</label><input type="number" step="0.0001" min="0" id="pcCost" value="${Number(p.cost) || 0}" /></div>
+        <div class="field"><label>Costo por Unidad Base (USD)</label><input type="text" inputmode="decimal" id="pcCostBase" value="${fmtDec(costBaseVal)}" placeholder="0.00" /></div>
+        <div class="field"><label>Costo por Unidad Canónica (USD)</label><input type="text" inputmode="decimal" id="pcCost" value="${fmtDec(Number(p.cost) || 0)}" readonly style="background:#f3f4f6" /></div>
         <div class="field"><label>% Ganancia</label><input type="number" step="0.01" min="0" max="99.99" id="pcGain" value="${gainVal}" /></div>
       </div>
       <div style="font-size:11px;color:#6b7280;margin-top:4px">El precio <b>automático</b> de una presentación = Costo × (1 + %Ganancia/100) × equivalencia. Si es <b>manual</b>, al editar el precio se recalcula el %Ganancia (máx. 99.99%).</div>
@@ -745,9 +747,13 @@ function productForm(id) {
   openModal({ title: editing ? 'Editar producto' : 'Nuevo producto', body: html, footer, size: 'modal-lg' });
   setTimeout(() => {
     const pcBaseUnit = $('#pcBaseUnit'), pcBaseCont = $('#pcBaseCont'), pcCanon = $('#pcCanon');
-    const pcCost = $('#pcCost'), pcGain = $('#pcGain');
+    const pcCost = $('#pcCost'), pcCostBase = $('#pcCostBase'), pcGain = $('#pcGain');
     const contenido = () => parseFloat(pcBaseCont.value) || 1;
     const cost = () => parseFloat(pcCost.value) || 0;
+    // Al ingresar Costo por Unidad Base se deriva el costo de la unidad canónica = base ÷ contenido
+    const costBase = () => parseFloat(String(pcCostBase.value).replace(',', '.')) || 0;
+    const syncCanonicalCost = () => { pcCost.value = fmtDec(costBase() / contenido()); };
+    const syncBaseCost = () => { pcCostBase.value = fmtDec(cost() * contenido()); };
     const gain = () => Math.min(99.99, Math.max(0, parseFloat(pcGain.value) || 0));
     const setGain = (g) => { pcGain.value = (Math.min(99.99, Math.max(0, g))).toFixed(2); };
     // Precio resuelto de la presentación base (todo)
@@ -809,7 +815,9 @@ function productForm(id) {
     catPanel.querySelectorAll('.cat-opt').forEach(b => b.addEventListener('click', () => { $('#pcCat').value = b.dataset.cat; catOpen = false; catPanel.style.display = 'none'; catTgl.textContent = '＋'; }));
     $('#pcAdd').addEventListener('click', () => { rows.push({ unidad: pcCanon.value || 'Unidad', equiv: 1, precio: 0, tipo: 'AUTO', activa: true, base: false }); paintRows(); });
     [pcBaseUnit, pcCanon].forEach(el => el.addEventListener('change', repaintAll));
-    [pcBaseCont, pcCost].forEach(el => el.addEventListener('input', repaintAll));
+    pcBaseCont.addEventListener('input', () => { syncCanonicalCost(); repaintAll(); });
+    pcCostBase.addEventListener('input', () => { syncCanonicalCost(); repaintAll(); });
+    pcCost.addEventListener('input', () => { syncBaseCost(); repaintAll(); });
     pcGain.addEventListener('input', repaintAll);
     paintRows(); showEquiv();
 
