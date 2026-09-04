@@ -214,17 +214,22 @@ function unitAbbr(name, count) {
 /* Abreviatura en plural (para encabezados/títulos donde no importa el conteo). */
 function unitAbbrPlural(name) { return unitAbbr(name, 2); }
 
-/* Descompone stock canónico en "N PresentaciónMaestra + resto canónico" (con abreviaciones). */
+/* Descompone stock canónico en presentaciones (jerárquico) usando los factores de
+   equivalencia de las presentaciones de venta. Ej. cigarrillos: "6 Cajetilla + 13 Unidad". */
 function invBreakdown(p, stockBase) {
-  const base = invBasePres(p);
   const can = invBaseUnit(p);
+  const views = invSaleViews(p);
+  const eqSet = new Set();
+  views.forEach(v => { const e = Number(v.equiv); if (e > 0) eqSet.add(e); });
+  eqSet.add(1);
+  const order = [...eqSet].sort((a, b) => b - a);
+  const labelFor = (e) => { const v = views.find(x => Math.abs(Number(x.equiv) - e) < 1e-9); return v ? (v.unidad || can) : can; };
   let rem = Number(stockBase) || 0;
   const terms = [];
-  const contenido = Number(base.contenido) || 1;
-  if (contenido > 1) {
-    const whole = Math.floor(rem / contenido);
-    if (whole !== 0) terms.push(fmtNumberStock(whole) + ' ' + unitAbbr(base.unidad, whole));
-    rem = rem - whole * contenido;
+  for (const e of order) {
+    if (e <= 1) break;
+    const whole = Math.floor(rem / e);
+    if (whole !== 0) { terms.push(fmtNumberStock(whole) + ' ' + unitAbbr(labelFor(e), whole)); rem -= whole * e; }
   }
   if (rem !== 0 || terms.length === 0) terms.push(fmtNumberStock(rem) + ' ' + unitAbbr(can, rem));
   return terms.join(' + ');
