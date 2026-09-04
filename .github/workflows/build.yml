@@ -25,8 +25,8 @@ jobs:
       - name: Compilar dependencias nativas para Electron
         run: npx electron-builder install-app-deps
 
-      - name: Generar instalador .exe (NSIS)
-        run: npx electron-builder --win nsis --x64
+      - name: Generar instalador .exe (NSIS + portable)
+        run: npx electron-builder --win --x64 --publish never
         env:
           # El build no firma; deshabilitamos publicación automática
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
