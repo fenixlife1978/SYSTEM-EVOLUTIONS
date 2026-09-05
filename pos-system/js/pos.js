@@ -1169,20 +1169,47 @@ function posReportZ() {
   const nArt = salesToday.reduce((s, x) => s + (x.items || 0), 0);
   const contado = salesToday.filter(s => s.status === 'paid').reduce((s, x) => s + x.total, 0);
   const credito = salesToday.filter(s => s.status === 'credit').reduce((s, x) => s + x.total, 0);
-  const reemb = refundsAll().filter(r => String(r.date).startsWith(today)).reduce((s, r) => s + (Number(r.usd) || 0), 0);
+  const refundsToday = refundsAll().filter(r => String(r.date).startsWith(today));
+  const reemb = refundsToday.reduce((s, r) => s + (Number(r.usd) || 0), 0);
   const tasa = fmt.usdRate();
   const taxIncl = db.settings.tax?.included !== false;
   const r = (db.settings.tax?.rate || 0) / 100;
   const base = taxIncl ? totalVentas / (1 + r) : totalVentas;
   const iva = taxIncl ? totalVentas - base : totalVentas * r;
   const jorn = db.jornada;
+  const fBs = Number(jorn?.fondoBs) || 0;
+  const fUsd = Number(jorn?.fondoUsd) || 0;
+
+  // Ventas del día por método real (desglose), neto de reembolsos
+  const amtM = {};
+  salesToday.forEach(s => {
+    if (s.status !== 'paid') return;
+    if (Array.isArray(s.payments) && s.payments.length) s.payments.forEach(p => { const k = p && p.method; if (k) amtM[k] = (amtM[k] || 0) + (Number(p.usd) || 0); });
+    else if (s.method && s.method !== 'mixto') amtM[s.method] = (amtM[s.method] || 0) + s.total;
+  });
+  refundsToday.forEach(rd => { const k = rd && rd.method; if (k) amtM[k] = (amtM[k] || 0) - (Number(rd.usd) || 0); });
+
+  const efecBsUsd = amtM['efectivoBs'] || 0;   // efectivo recibido en Bs. (guardado en USD)
+  const efecUsd = amtM['efectivoUsd'] || 0;
+  const zelle = amtM['zelle'] || 0;
+  const totalEfecBs = efecBsUsd * tasa + fBs;   // Ventas Efectivo Bs + Fondo inicial Bs
+  const totalEfecUsd = efecUsd + zelle + fUsd;  // Ventas Efectivo USD + Zelle + Fondo inicial USD
+
+  // Movimientos de caja del día (ingresos / egresos)
+  const cajaToday = db.cashbox.filter(c => String(c.date).startsWith(today));
+  const cajaIng = cajaToday.reduce((s, c) => s + (c.amount > 0 ? c.amount : 0), 0);
+  const cajaEgr = cajaToday.reduce((s, c) => s + (c.amount < 0 ? -c.amount : 0), 0);
+
+  const padM = (l, v, x) => String(l).padEnd(16) + String(v).padStart(14) + (x != null ? String(x).padStart(10) : '');
+  const methodLines = PAY_METHODS.filter(m => amtM[m.k]).map(m =>
+    '  ' + m.lbl.padEnd(14) + fmt.esp(amtM[m.k]).padStart(12) + (m.cur === 'BS' ? ('Bs. ' + fmt.esp(amtM[m.k] * tasa)).padStart(12) : ''));
+
   const text = [
     '        POSsystem Evolution        ',
     '     Cierre de jornada (Reporte Z) ',
     ' '.padStart(1),
-    'Fecha : ' + now.toLocaleDateString('es-VE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }),
+    'Fecha : ' + veDate() + ' ' + veHm12(veTime()),
     'Cajero: ' + (session?.user?.name || 'Cajero'),
-    'Hora  : ' + now.toTimeString().slice(0, 5),
     ' '.padStart(1),
     '==================================',
     'Ventas del día  : ' + nVentas,
@@ -1196,7 +1223,25 @@ function posReportZ() {
     'Crédito (CxC)   : ' + fmt.money(credito),
     'Reembolsos      : ' + fmt.money(reemb),
     '==================================',
-    'Tasa Bs/USD     : ' + fmt.num(tasa),
+    'VENTAS POR METODO DE PAGO',
+    ...(methodLines.length ? methodLines : ['  (sin datos)']),
+    '----------------------------------',
+    'MOVIMIENTOS DE CAJA (hoy)',
+    '  Ingresos       : ' + fmt.money(cajaIng),
+    '  Egresos        : ' + fmt.money(cajaEgr),
+    '----------------------------------',
+    'EFECTIVO Bs.',
+    '  Ventas Efec. Bs    : ' + fmt.bs(efecBsUsd),
+    '  Fondo inicial Bs.  : Bs. ' + fmt.esp(fBs),
+    '  TOTAL Bs.          : Bs. ' + fmt.esp(totalEfecBs),
+    '----------------------------------',
+    'EFECTIVO USD',
+    '  Ventas Efec. USD   : ' + fmt.money(efecUsd),
+    '  Ventas Zelle       : ' + fmt.money(zelle),
+    '  Fondo inicial USD  : ' + fmt.money(fUsd),
+    '  TOTAL USD          : ' + fmt.money(totalEfecUsd),
+    '==================================',
+    'Tasa Bs/USD     : ' + fmt.esp(tasa),
     'Equiv. Bs       : ' + fmt.bs(totalVentas),
     (jorn?.active ? 'Estado jornada : ABIERTA' : 'Estado jornada : CERRADA'),
     String(db.settings.pos.receiptFooter || '').split('\n').map(t => t.trim()).filter(Boolean).join('\n')
