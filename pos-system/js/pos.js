@@ -1398,7 +1398,8 @@ function posRefund() {
       </div>
     </div>
   `;
-  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
+  const footer = `<button class="btn" id="rfHist">${ico('units')} Historial de reembolsos</button>
+                  <button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn danger" id="rfOk">${ico('close')} Procesar reembolso</button>`;
   openModal({ title: 'F10 — Reembolso (parcial o total)', body, footer, size: 'modal-lg' });
   setTimeout(() => {
@@ -1440,6 +1441,7 @@ function posRefund() {
     };
     $('#rfSale').addEventListener('change', repaint);
     $('#rfMethod').addEventListener('change', total);
+    const hb = $('#rfHist'); if (hb) hb.addEventListener('click', () => { closeModal(); posRefundHistory(); });
     repaint();
     $('#rfOk').addEventListener('click', () => {
       const s = sale();
@@ -1456,6 +1458,84 @@ function posRefund() {
       toast(`Reembolso ${r.full ? 'total' : 'parcial'} procesado: ${fmt.money(r.totalUsd)}`, r.full ? 'warn' : 'success', 3200);
     });
   }, 60);
+}
+
+/* Historial de reembolsos: filtro por día/mes/personalizado y detalle solo lectura */
+function posRefundHistory() {
+  const renderWrap = () => {
+    const html = `
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="field"><label>Periodo</label>
+          <select id="rhPer"><option value="today">Hoy</option><option value="month">Este mes</option><option value="custom">Personalizado</option></select>
+        </div>
+        <div class="field" id="rhCustomBox" style="display:none"><label>&nbsp;</label>
+          <div style="display:flex;gap:6px;align-items:center"><input type="date" id="rhFrom" /> <span>a</span> <input type="date" id="rhTo" /></div>
+        </div>
+      </div>
+      <div id="rhList" style="max-height:380px;overflow:auto"></div>
+    `;
+    const footer = `<button class="btn" onclick="closeModal()">Cerrar</button>`;
+    openModal({ title: 'Historial de reembolsos', body: html, footer, size: 'modal-lg' });
+    setTimeout(() => {
+      const paint = () => {
+        const per = $('#rhPer').value;
+        $('#rhCustomBox').style.display = per === 'custom' ? 'block' : 'none';
+        const list = refundsAll().filter(r => {
+          const d = String(r.date).slice(0, 10);
+          if (per === 'today') return d === posDateStr();
+          if (per === 'month') return d.slice(0, 7) === posDateStr().slice(0, 7);
+          const a = $('#rhFrom').value, b = $('#rhTo').value;
+          return (!a || d >= a) && (!b || d <= b);
+        });
+        const box = $('#rhList');
+        if (list.length === 0) { box.innerHTML = '<div class="dt empty">No hay reembolsos en el periodo</div>'; return; }
+        box.innerHTML = `<table class="dt" style="width:100%"><thead><tr><th>Fecha</th><th>Recibo</th><th>Cliente</th><th>Método</th><th class="num">Monto</th><th>Tipo</th><th></th></tr></thead><tbody>
+          ${list.map(r => `<tr>
+            <td>${r.date}</td>
+            <td><code>${r.number || '—'}</code></td>
+            <td>${r.client || '—'}</td>
+            <td>${METHOD_LBL(r.method)}</td>
+            <td class="num">${fmt.money(r.usd)} <small style="color:#6b7280">Bs. ${fmt.esp((Number(r.usd) || 0) * (Number(r.rate) || 0))}</small></td>
+            <td>${r.full ? '<span class="pill red">Total</span>' : '<span class="pill yellow">Parcial</span>'}</td>
+            <td><button class="btn sm primary" data-rd="${r.id}">Ver detalle</button></td>
+          </tr>`).join('')}</tbody></table>`;
+        $$('#rhList button[data-rd]').forEach(b => b.addEventListener('click', () => posRefundDetail(+b.dataset.rd)));
+      };
+      $('#rhPer').addEventListener('change', paint);
+      ['#rhFrom', '#rhTo'].forEach(s => { const el = $(s); if (el) el.addEventListener('change', paint); });
+      paint();
+    }, 60);
+  };
+  renderWrap();
+}
+
+/* Detalle (solo lectura) de un reembolso registrado */
+function posRefundDetail(id) {
+  const r = refundsAll().find(x => x.id === id);
+  if (!r) return;
+  const rate = Number(r.rate) || fmt.usdRate();
+  const items = Array.isArray(r.items) ? r.items : [];
+  const itemsHtml = `<table class="dt" style="width:100%"><thead><tr><th>Producto</th><th>UM</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Subtotal</th></tr></thead><tbody>
+    ${items.map(l => `<tr><td>${l.name}</td><td>${unitAbbr(l.present || l.base || 'Und', l.qty)}</td><td class="num">${fmtNumStock(l.qty)}</td><td class="num">${fmt.frac(l.price)}</td><td class="num">${fmt.money((Number(l.qty) || 0) * (Number(l.price) || 0))}</td></tr>`).join('')}
+  </tbody></table>`;
+  const body = `
+    <div class="form-grid" style="margin-bottom:10px">
+      <div class="field"><label>Recibo</label><input value="${r.number || '—'}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Fecha reembolso</label><input value="${r.date}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Cliente</label><input value="${r.client || '—'}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Método</label><input value="${METHOD_LBL(r.method)}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Tipo</label><input value="${r.full ? 'Total' : 'Parcial'}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Tasa venta (Bs/USD)</label><input value="${fmt.esp(rate)}" disabled style="background:#f3f4f6" /></div>
+    </div>
+    <b style="font-size:12px;color:#1f2937">Items reembolsados</b>
+    <div style="max-height:180px;overflow:auto;margin:6px 0 12px;border:1px solid #e2e6ec;border-radius:8px">${itemsHtml}</div>
+    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;text-align:center">
+      <div style="font-size:12px;color:#b91c1c">Monto reembolsado</div>
+      <div style="font-size:26px;font-weight:800;color:#b91c1c;font-family:Consolas,monospace">${fmt.money(r.usd)}</div>
+      <div style="font-size:13px;color:#b45309">Bs. ${fmt.esp((Number(r.usd) || 0) * rate)}</div>
+    </div>`;
+  const footer = `<button class="btn" onclick="closeModal()">Cerrar</button>`;
+  openModal({ title: 'Detalle de reembolso · ' + (r.number || '') , body, footer, size: 'modal-lg' });
 }
 
 /* F11 — Consulta rápida de precios */
