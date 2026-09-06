@@ -58,7 +58,6 @@ Barra de herramientas con los módulos:
 ### Entidades
 - **Clientes**: 6 clientes pre-cargados, gestión completa
 - **Proveedores**: 6 proveedores pre-cargados
-- **Empleados**: gestión de personal
 
 ### Finanzas
 - **Contabilidad**: libro diario de ingresos y egresos

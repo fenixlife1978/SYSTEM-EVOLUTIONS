@@ -20,8 +20,6 @@ const seedData = {
 
   suppliers: [],
 
-  employees: [],
-
   receivables: [],
   payables: [],
   purchases: [],

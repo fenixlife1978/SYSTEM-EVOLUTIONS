@@ -236,7 +236,6 @@
       <button class="nav-item tool-item" data-view="cxp"><img class="ic" data-ic="am-cxp" alt="" /><span>C. por Pagar</span></button>
       <button class="nav-item tool-item" data-view="clients"><img class="ic" data-ic="am-clientes" alt="" /><span>Clientes</span></button>
       <button class="nav-item tool-item" data-view="suppliers"><img class="ic" data-ic="am-proveedores" alt="" /><span>Proveedores</span></button>
-      <button class="nav-item tool-item" data-view="employees"><img class="ic" data-ic="am-empleados" alt="" /><span>Empleados</span></button>
       <button class="nav-item tool-item" data-view="accounting"><img class="ic" data-ic="am-contabilidad" alt="" /><span>Contabilidad</span></button>
       <button class="nav-item tool-item" data-view="cashbox"><img class="ic" data-ic="am-caja" alt="" /><span>Caja / Bancos</span></button>
       <button class="nav-item tool-item" data-view="reports"><img class="ic" data-ic="am-reportes" alt="" /><span>Reportes</span></button>
@@ -275,6 +274,7 @@
 <!-- Iframe oculto para imprimir tickets (impresora térmica 80mm) -->
 <iframe id="printFrame" name="printFrame" style="display:none" title="Impresión de tickets"></iframe>
 
+<script src="lib/jspdf.umd.min.js"></script>
 <script src="js/data.js"></script>
 <script src="js/inventory.js"></script>
 <script src="js/icons.js"></script>
@@ -282,5 +282,6 @@
 <script src="js/pos.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/modules.js"></script>
+<script src="js/reportpdf.js"></script>
 </body>
 </html>

@@ -12,7 +12,6 @@ const DASH_VIEWS = {
   cxp:        { title: 'Cuentas por Pagar',    crumb: 'Operaciones › CxP',                  render: () => renderCxP() },
   clients:    { title: 'Clientes',             crumb: 'Entidades › Clientes',               render: () => renderClients() },
   suppliers:  { title: 'Proveedores',          crumb: 'Entidades › Proveedores',            render: () => renderSuppliers() },
-  employees:  { title: 'Empleados',            crumb: 'Entidades › Empleados',              render: () => renderEmployees() },
   accounting: { title: 'Contabilidad',         crumb: 'Finanzas › Contabilidad',            render: () => renderAccounting() },
   cashbox:    { title: 'Caja y Bancos',        crumb: 'Finanzas › Caja',                    render: () => renderCashbox() },
   reports:    { title: 'Reportes',             crumb: 'Finanzas › Reportes',                render: () => renderReports() },

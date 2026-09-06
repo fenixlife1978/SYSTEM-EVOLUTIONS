@@ -5,32 +5,35 @@
 /* ============================================================
    COMPRAS (Entradas)
    ============================================================ */
+/* Forma de pago de una compra: Contado / Crédito / Mixto (admite legado 'cash'). */
+const purPayLabel = (v) => v === 'cash' || v === 'contado' ? 'Contado' : v === 'mixto' ? 'Mixto' : 'Crédito';
+const purPayPill = (v) => {
+  if (v === 'cash' || v === 'contado') return '<span class="pill green">Contado</span>';
+  if (v === 'mixto') return '<span class="pill blue">Mixto</span>';
+  return '<span class="pill yellow">Crédito</span>';
+};
+
 function renderPurchases() {
   const html = `
     <div class="module-head">
-      <h3>Compras (Entradas de mercancía)</h3>
+      <h3>Historial de Compras</h3>
       <div class="actions">
         <button class="btn primary" id="newPurchase">+ Nueva compra</button>
       </div>
     </div>
 
     <div class="grid cols-4" style="margin-bottom:14px">
-      <div class="kpi"><div class="kpi-info"><div class="lbl">Compras del mes</div><div class="val">${fmt.money(db.purchases.reduce((s, p) => s + p.total, 0))}</div></div><div class="kpi-ico">${ico('purchases')}</div></div>
-      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Órdenes recibidas</div><div class="val">${db.purchases.filter(p => p.status === 'received').length}</div></div><div class="kpi-ico">${ico('check')}</div></div>
-      <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">Pendientes</div><div class="val">${db.purchases.filter(p => p.status === 'pending').length}</div></div><div class="kpi-ico">${ico('pending')}</div></div>
-      <div class="kpi k-red"><div class="kpi-info"><div class="lbl">Total proveedores</div><div class="val">${db.suppliers.length}</div></div><div class="kpi-ico">${ico('suppliers')}</div></div>
+      <div class="kpi"><div class="kpi-info"><div class="lbl">Total comprado (USD)</div><div class="val">${fmt.money(db.purchases.reduce((s, p) => s + p.total, 0))}</div></div><div class="kpi-ico">${ico('purchases')}</div></div>
+      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Compras registradas</div><div class="val">${db.purchases.length}</div></div><div class="kpi-ico">${ico('docs')}</div></div>
+      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Contado</div><div class="val">${db.purchases.filter(p => p.payment === 'contado' || p.payment === 'cash').length}</div></div><div class="kpi-ico">${ico('check')}</div></div>
+      <div class="kpi k-red"><div class="kpi-info"><div class="lbl">Crédito / Mixto</div><div class="val">${db.purchases.filter(p => p.payment === 'credit' || p.payment === 'mixto').length}</div></div><div class="kpi-ico">${ico('cxp')}</div></div>
     </div>
 
     <div class="dt">
       <div class="dt-toolbar">
-        <h3>Listado de compras</h3>
+        <h3>Historial de compras</h3>
         <div class="tools">
           <input class="search" id="purSearch" placeholder="Buscar por proveedor, factura..." />
-          <select id="purStatus">
-            <option value="">Todos los estados</option>
-            <option value="received">Recibidas</option>
-            <option value="pending">Pendientes</option>
-          </select>
         </div>
       </div>
       <div class="dt-wrap">
@@ -43,7 +46,6 @@ function renderPurchases() {
               <th class="num">Items</th>
               <th class="num">Total</th>
               <th>Pago</th>
-              <th>Estado</th>
               <th></th>
             </tr>
           </thead>
@@ -55,21 +57,18 @@ function renderPurchases() {
   $('#dashContent').innerHTML = html;
   paintPurchases();
   $('#purSearch').addEventListener('input', paintPurchases);
-  $('#purStatus').addEventListener('change', paintPurchases);
   $('#newPurchase').addEventListener('click', purchaseForm);
 }
 
 function paintPurchases() {
   const q = ($('#purSearch')?.value || '').toLowerCase();
-  const st = $('#purStatus')?.value || '';
   const list = db.purchases.filter(p => {
-    if (st && p.status !== st) return false;
     if (q && !p.supplier.toLowerCase().includes(q) && !p.invoice.toLowerCase().includes(q)) return false;
     return true;
   });
   const tb = $('#purTbody');
   if (!tb) return;
-  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="8" class="empty">Sin resultados</td></tr>`; return; }
+  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">Sin resultados</td></tr>`; return; }
   tb.innerHTML = list.map(p => `
     <tr>
       <td>${fmt.date(p.date)}</td>
@@ -77,8 +76,7 @@ function paintPurchases() {
       <td><code>${p.invoice}</code></td>
       <td class="num">${p.items}</td>
       <td class="num">${fmt.money(p.total)}</td>
-      <td>${p.payment === 'cash' ? '<span class="pill green">Contado</span>' : '<span class="pill yellow">Crédito</span>'}</td>
-      <td>${statusPill(p.status)}</td>
+      <td>${purPayPill(p.payment)}</td>
       <td class="actions-cell">
         <button class="btn sm" data-view="${p.id}">Ver</button>
         <button class="btn sm danger" data-del="${p.id}">Anular</button>
@@ -90,20 +88,98 @@ function paintPurchases() {
     db.purchases = db.purchases.filter(x => x.id !== +b.dataset.del);
     DB.save(db); paintPurchases(); toast('Compra anulada', 'warn');
   }));
-  $$('button[data-view]', tb).forEach(b => b.addEventListener('click', () => {
-    const p = db.purchases.find(x => x.id === +b.dataset.view);
-    openModal({ title: `Compra ${p.invoice}`, body: `
-      <div class="grid cols-2">
-        <div><b>Fecha:</b> ${fmt.date(p.date)}</div>
-        <div><b>Proveedor:</b> ${p.supplier}</div>
-        <div><b>Factura:</b> ${p.invoice}</div>
-        <div><b>Items:</b> ${p.items}</div>
-        <div><b>Total:</b> ${fmt.money(p.total)}</div>
-        <div><b>Forma de pago:</b> ${p.payment === 'cash' ? 'Contado' : 'Crédito'}</div>
-        <div><b>Estado:</b> ${statusPill(p.status)}</div>
+  $$('button[data-view]', tb).forEach(b => b.addEventListener('click', () => viewPurchase(+b.dataset.view)));
+}
+
+/* Modal con el detalle completo de una compra (items, cantidades, costos, totales y pago). */
+function viewPurchase(id) {
+  const p = db.purchases.find(x => x.id === id);
+  if (!p) return;
+  const rate = Number(p.rate) || fmt.usdRate();
+  const det = Array.isArray(p.detail) ? p.detail : [];
+  const baseOf = (d) => d.base || (() => { const pr = db.products.find(pr => String(pr.code) === String(d.code)); return pr ? invBaseUnit(pr) : 'und'; })();
+  const itemsRows = det.length === 0
+    ? '<tr><td colspan="8" class="empty">Sin detalle de productos</td></tr>'
+    : det.map((d, i) => `<tr>
+        <td class="num">${i + 1}</td>
+        <td><code>${d.code || ''}</code></td>
+        <td>${d.name}</td>
+        <td class="num">${fmtNumK(d.qty)} ${d.entry || ''}</td>
+        <td class="num">${fmtNumK(d.baseQty)} ${baseOf(d)}</td>
+        <td class="num">${fmt.moneyDyn(d.cost)}</td>
+        <td class="num">${fmt.money(d.baseQty * d.cost)}</td>
+      </tr>`).join('');
+
+  const payBlock = `
+    <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Forma de pago</span><b>${purPayLabel(p.payment)}${p.days ? ' · ' + p.days + ' días' : ''}</b></div>
+    ${p.payment === 'mixto' ? `
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Contado en Bs.</span><b>Bs. ${fmt.esp(p.paidBs || 0)}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Contado en USD (equiv.)</span><b>${fmt.money(p.paidUsd || 0)}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Saldo a crédito (CxP)</span><b>${fmt.money(p.creditUSD || 0)}</b></div>` : ''}
+  `;
+
+  openModal({ title: 'Compra ' + p.invoice, body: `
+    <div class="form-grid" style="margin-bottom:12px">
+      <div class="field"><label>Fecha</label><input value="${fmt.date(p.date)}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Proveedor</label><input value="${p.supplier}" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Factura proveedor</label><input value="${p.invoice}" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
+      <div class="field"><label>N° de productos</label><input value="${p.items} (${det.length} líneas)" disabled style="background:#f3f4f6" /></div>
+      <div class="field"><label>Tasa BCV</label><input value="${fmt.num(rate)} Bs/USD" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
+    </div>
+    <b style="font-size:12px;color:#1f2937">Productos / líneas (${det.length})</b>
+    <div class="dt-wrap" style="max-height:260px;overflow:auto;margin:6px 0 12px;border:1px solid #e2e6ec;border-radius:8px">
+      <table class="dt">
+        <thead><tr><th>#</th><th>Código</th><th>Descripción</th><th class="num">Cant. entrada</th><th class="num">Entra al stock</th><th class="num">Costo/base</th><th class="num">Subtotal</th></tr></thead>
+        <tbody>${itemsRows}</tbody>
+      </table>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
+      <div>${payBlock}</div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total factura (USD)</span><b>${fmt.money(p.total)}</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total factura (Bs.)</span><b>Bs. ${fmt.esp((p.total || 0) * rate)}</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding:4px 0 0;border-top:1px dashed #bbf7d0;color:#15803d"><span>Total</span><b>${fmt.money(p.total)}</b></div>
       </div>
-    `, footer: `<button class="btn primary" onclick="closeModal()">Cerrar</button>` });
-  }));
+    </div>
+  `, footer: `<button class="btn" onclick="viewPurchasePrint(${p.id})">${ico('print')} Imprimir</button>
+              <button class="btn primary" onclick="closeModal()">Cerrar</button>`, size: 'modal-lg' });
+}
+
+/* Imprime un comprobante 80mm de la compra usando la plantilla térmica compartida. */
+function viewPurchasePrint(id) {
+  const p = db.purchases.find(x => x.id === id);
+  if (!p) return;
+  const c = db.settings.company;
+  const rate = Number(p.rate) || fmt.usdRate();
+  const det = Array.isArray(p.detail) ? p.detail : [];
+  const baseOf = (d) => d.base || 'und';
+  const lns = [];
+  const push = (t) => lns.push(t);
+  push(recPadC(c.name));
+  if (c.rif) push(recPadC('RIF: ' + c.rif));
+  push('');
+  push(recPadC('COMPRA / ENTRADA'));
+  push('');
+  push(recPadLR('Factura:', p.invoice));
+  push(recPadLR('Fecha:', fmt.date(p.date)));
+  push(recPadLR('Proveedor:', String(p.supplier).slice(0, 20)));
+  push(recPadLR('Pago:', purPayLabel(p.payment) + (p.days ? ' (' + p.days + ' d)' : '')));
+  push(recSep());
+  det.forEach(d => {
+    push((String(d.name || '') + '  ' + (d.code || '')).slice(0, REC.chars));
+    const cont = '   ' + fmtNumK(d.qty) + ' ' + (d.entry || '') + ' x $' + fmt.num(d.cost);
+    push(recPadLR(cont.slice(0, REC.chars), fmt.num(d.baseQty * d.cost)));
+  });
+  push(recSep());
+  push(recPadLR('TOTAL USD', fmt.money(p.total)));
+  push(recPadLR('TOTAL Bs.', 'Bs. ' + fmt.esp((p.total || 0) * rate)));
+  push(recSep());
+  if (p.payment === 'mixto') {
+    push(recPadLR('Contado', fmt.money(p.paidUsd || 0)));
+    push(recPadLR('Saldo crédito', fmt.money(p.creditUSD || 0)));
+    push(recSep());
+  }
+  printHtml(thermalShell('Compra ' + p.invoice, lns));
 }
 
 function purchaseForm() {
@@ -112,6 +188,7 @@ function purchaseForm() {
     canonicalizeProduct(p);
     return invSaleViews(p).map(v => ({ key: v.unidad, entry: v.unidad, factor: v.equiv, precio: v.precio }));
   };
+  const sysRate = fmt.usdRate();
   const html = `
     <div class="form-grid">
       <div class="field"><label>Fecha</label><input type="date" id="pfDate" value="${veDate()}" /></div>
@@ -120,7 +197,11 @@ function purchaseForm() {
       </div>
       <div class="field"><label>N° Factura proveedor</label><input id="pfInvoice" placeholder="P-2025-..." /></div>
       <div class="field"><label>Forma de pago</label>
-        <select id="pfPay"><option value="credit">Crédito (CxP)</option><option value="cash">Contado</option></select>
+        <select id="pfPay">
+          <option value="contado">Contado</option>
+          <option value="credit" selected>Crédito</option>
+          <option value="mixto">Mixto</option>
+        </select>
       </div>
     </div>
     <div class="card-title" style="margin-top:8px">Detalle de productos (entrada al inventario)</div>
@@ -136,15 +217,27 @@ function purchaseForm() {
       <button class="btn primary" id="pfAdd">+ Agregar</button>
     </div>
     <div style="font-size:11px;color:#6b7280;margin-top:4px" id="pfHint"></div>
-    <div style="display:flex;justify-content:space-between;margin-top:14px;padding:10px;background:#f0fdf4;border-radius:6px">
-      <b>Total</b><b id="pfTotal" style="font-size:18px;color:var(--green)">${fmt.money(0)}</b>
+
+    <div class="card-title" style="margin-top:14px">Condiciones de pago</div>
+    <div class="form-grid" style="margin-top:6px">
+      <div class="field"><label>Tasa BCV aplicada (Bs/USD)</label><input id="pfRate" inputmode="decimal" value="${fmt.num(sysRate)}" title="Tasa usada para convertir Bs. ↔ USD" /></div>
+      <div class="field" id="pfDaysWrap"><label>Días de crédito</label><input id="pfDays" type="number" min="1" value="30" /></div>
     </div>
+    <div id="pfMixto" style="display:none;border:1px solid #e0e7ef;background:#f8fafc;border-radius:8px;padding:10px;margin-top:4px">
+      <b style="font-size:12px;color:#374151">Pago de contado (se descuenta del total)</b>
+      <div class="form-grid" style="margin-top:6px">
+        <div class="field"><label>Pago en Bs.</label><input id="pfPayBs" inputmode="decimal" value="0" /></div>
+        <div class="field"><label>Pago en USD</label><input id="pfPayUsd" inputmode="decimal" value="0" /></div>
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin-top:4px">Al escribir un monto en Bs. se calcula su equivalente en USD con la tasa aplicada, y viceversa. El resto del total se registra como crédito (CxP).</div>
+    </div>
+    <div id="pfSum" style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="pfSave">Registrar compra</button>`;
   openModal({ title: 'Nueva compra', body: html, footer, size: 'modal-lg' });
-  const state = { items: [] };
-  const num = (s) => parseFloat(String(s).trim().replace(',', '.')) || 0;
+  const state = { items: [], rate: sysRate };
+  const num = (s) => parseFloat(String(s == null ? '' : s).replace(',', '.')) || 0;
   const curProd = () => db.products.find(x => x.id === +$('#pfProd').value);
   const optsOf = () => buyOpts(curProd());
   const selOpt = () => { const s = $('#pfUnit'); const o = optsOf()[s.selectedIndex]; return o || optsOf()[0]; };
@@ -175,10 +268,36 @@ function purchaseForm() {
     $('#pfHint').textContent = (p ? (p.name + ' · ') : '') + (o ? o.entry : '') + ' × ' + q + ' = ' + fmtNum(es) + ' ' + base + ' al stock (unidad canónica) · costo/unidad $' + fmtNum($('#pfCost').value);
   };
   const fmtNum = (v) => (Number(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
-  const recalc = () => { const tot = state.items.reduce((s, i) => s + (i.baseQty * i.costBase), 0); $('#pfTotal').textContent = fmt.money(tot); };
+  const itemTotal = () => state.items.reduce((s, i) => s + (i.baseQty * i.costBase), 0);
+  const mode = () => $('#pfPay').value;
+  const curRate = () => { state.rate = fmt.parseEsp($('#pfRate').value); if (!(state.rate > 0)) state.rate = sysRate; return state.rate; };
+  const dec2 = (v) => String(Math.round((Number(v) || 0) * 100) / 100);
+
+  // Recalcula todos los montos según forma de pago y pinta el resumen siempre visible.
+  const recalc = () => {
+    const total = itemTotal();
+    const m = mode();
+    curRate();
+    $('#pfMixto').style.display = m === 'mixto' ? 'block' : 'none';
+    $('#pfDaysWrap').style.display = (m === 'credit' || m === 'mixto') ? '' : 'none';
+    let cashBs = 0, cashUsd = 0;
+    if (m === 'mixto') { cashBs = fmt.parseEsp($('#pfPayBs').value); cashUsd = fmt.parseEsp($('#pfPayUsd').value); }
+    let cashUSD = 0, credit = total;
+    if (m === 'contado') cashUSD = total;
+    else if (m === 'credit') cashUSD = 0;
+    else cashUSD = cashUsd + (state.rate > 0 ? cashBs / state.rate : 0);
+    cashUSD = Math.min(cashUSD, total);
+    credit = Math.max(0, total - cashUSD);
+    state.cashUSD = cashUSD; state.creditUSD = credit;
+    const bf = (t) => { const w = t * state.rate; return 'Bs. ' + fmt.esp(w); };
+    $('#pfSum').innerHTML = `
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total Factura (Bs.)</span><b>${bf(total)}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total Factura (USD)</span><b>${fmt.money(total)}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Pago de contado (USD)</span><b>${fmt.money(cashUSD)} <small style="color:#6b7280">(${bf(cashUSD)})</small></b></div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding:4px 0 0;border-top:1px dashed #bbf7d0;color:#15803d"><span>Saldo pendiente (crédito)</span><b>${fmt.money(credit)} <small style="color:#15803d">(${bf(credit)})</small></b></div>`;
+  };
   const repaint = () => {
     const tb = $('#pfBody');
-    const baseL = state.items.length ? (state.items[0].base || '') : '';
     if (state.items.length === 0) tb.innerHTML = `<tr><td colspan="8" class="empty">Sin productos</td></tr>`;
     else tb.innerHTML = state.items.map((i, idx) => `
       <tr>
@@ -191,13 +310,18 @@ function purchaseForm() {
         <td class="num">${fmt.money(i.baseQty * i.costBase)}</td>
         <td><button class="btn sm danger" data-rm="${idx}">${ico('close')}</button></td>
       </tr>`).join('');
-    $$('button[data-rm]', tb).forEach(b => b.addEventListener('click', () => { state.items.splice(+b.dataset.rm, 1); repaint(); recalc(); }));
+    $$('button[data-rm]', tb).forEach(b => b.addEventListener('click', () => { state.items.splice(+b.dataset.rm, 1); repaint(); }));
     recalc();
   };
   $('#pfQty').addEventListener('input', hint);
   $('#pfCost').addEventListener('input', hint);
   $('#pfProd').addEventListener('change', fillUnit);
   $('#pfUnit').addEventListener('change', hint);
+  $('#pfRate').addEventListener('input', recalc);
+  $('#pfPay').addEventListener('change', recalc);
+  // Conversión automática Bs. ↔ USD según la tasa aplicada (al recargar ambos campos).
+  $('#pfPayBs').addEventListener('input', () => { curRate(); if (state.rate > 0) $('#pfPayUsd').value = dec2(fmt.parseEsp($('#pfPayBs').value) / state.rate); recalc(); });
+  $('#pfPayUsd').addEventListener('input', () => { curRate(); $('#pfPayBs').value = dec2(fmt.parseEsp($('#pfPayUsd').value) * state.rate); recalc(); });
   fillUnit(); repaint();
   $('#pfAdd').addEventListener('click', () => {
     const p = curProd();
@@ -221,11 +345,23 @@ function purchaseForm() {
     if (state.items.length === 0) { toast('Agregue al menos un producto', 'warn'); return; }
     const sup = db.suppliers.find(s => s.id === +$('#pfSupplier').value);
     if (!sup) { toast('Seleccione el proveedor', 'warn'); return; }
+    const m = mode(); curRate();
+    const days = Math.max(1, Math.round(fmt.parseEsp($('#pfDays').value) || 30));
+    let cashBs = 0, cashUsd = 0;
+    if (m === 'mixto') { cashBs = fmt.parseEsp($('#pfPayBs').value); cashUsd = fmt.parseEsp($('#pfPayUsd').value); }
+    const total = itemTotal();
+    let cashUSD = m === 'contado' ? total : (m === 'credit' ? 0 : cashUsd + (state.rate > 0 ? cashBs / state.rate : 0));
+    cashUSD = Math.min(cashUSD, total);
+    let credit = Math.max(0, total - cashUSD);
+    if (m === 'mixto') {
+      if (cashUSD <= 0) { toast('En pago Mixto indique un pago de contado (Bs. o USD)', 'warn'); return; }
+      if (total - cashUSD <= 0.004) { toast('El pago de contado cubre el total; seleccione Contado', 'warn'); return; }
+    }
+    if ((m === 'credit' || m === 'mixto') && !($('#pfDays').value > 0)) { toast('Indique los días de crédito', 'warn'); return; }
     // Sumar stock por producto (en unidad base)
     const acc = {};
     state.items.forEach(i => { acc[i.pid] = (acc[i.pid] || 0) + i.baseQty; });
     Object.keys(acc).forEach(pid => { const pr = db.products.find(x => x.id === +pid); if (pr) { canonicalizeProduct(pr); pr.stockBase = (invStock(pr) || 0) + acc[pid]; } });
-    const total = state.items.reduce((s, i) => s + (i.baseQty * i.costBase), 0);
     const purchase = {
       id: db.purchases.length + 1,
       date: $('#pfDate').value,
@@ -233,9 +369,12 @@ function purchaseForm() {
       invoice: $('#pfInvoice').value || 'P-' + Date.now(),
       items: state.items.length,
       total,
-      status: 'received',
-      payment: $('#pfPay').value,
-      detail: state.items.map(i => ({ code: i.code, name: i.name, entry: i.entry, qty: i.qty, baseQty: i.baseQty, cost: i.costBase }))
+      payment: m,
+      rate: state.rate, days: m === 'credit' || m === 'mixto' ? days : 0,
+      paidBs: m === 'mixto' ? cashBs : 0,
+      paidUsd: cashUSD,
+      creditUSD: credit,
+      detail: state.items.map(i => ({ code: i.code, name: i.name, entry: i.entry, base: invBaseUnit(db.products.find(pr => pr.id === i.pid) || i), qty: i.qty, baseQty: i.baseQty, cost: i.costBase }))
     };
     db.purchases.unshift(purchase);
     // Egreso contable
@@ -246,22 +385,22 @@ function purchaseForm() {
       description: `Compra a ${sup.name} (${purchase.invoice})`,
       amount: total, ref: 'COMP-' + purchase.invoice
     });
-    // Si es crédito, generar CxP
-    if (purchase.payment === 'credit') {
-      const due = new Date(purchase.date); due.setDate(due.getDate() + 30);
+    // Generar CxP por el saldo pendiente (crédito): contado = 0, crédito = total, mixto = total − contado.
+    if (credit > 0.004) {
+      const due = new Date(purchase.date + 'T00:00:00'); due.setDate(due.getDate() + days);
       db.payables.unshift({
         id: db.payables.length + 1,
         date: purchase.date,
         supplier: sup.name,
         docType: 'FAC', docNumber: purchase.invoice,
-        total, paid: 0, balance: total,
+        total: credit, paid: 0, balance: credit,
         dueDate: due.toISOString().slice(0, 10),
         status: 'pending'
       });
-      sup.balance = (sup.balance || 0) + total;
+      sup.balance = (sup.balance || 0) + credit;
     }
     DB.save(db); closeModal(); renderPurchases();
-    toast(`Compra registrada: ${fmt.money(total)}`, 'success');
+    toast(`Compra registrada: ${fmt.money(total)} · Contado ${fmt.money(cashUSD)} · Crédito ${fmt.money(credit)}`, 'success', 3800);
   });
 }
 
@@ -686,9 +825,6 @@ function renderSales() {
   const html = `
     <div class="module-head">
       <h3>Historial de ventas</h3>
-      <div class="actions">
-        <button class="btn primary" onclick="showPOS()">+ Nueva venta</button>
-      </div>
     </div>
     <div class="grid cols-4" style="margin-bottom:14px">
       <div class="kpi"><div class="kpi-info"><div class="lbl">Total ventas</div><div class="val">${fmt.money(total)}</div></div><div class="kpi-ico">${ico('cxc')}</div></div>
@@ -1240,137 +1376,6 @@ function supplierForm(id) {
 }
 
 /* ============================================================
-   EMPLEADOS (gestión de personal / nómina)
-   Colección propia db.employees, independiente de los usuarios
-   de acceso al sistema (login).
-   ============================================================ */
-function employeesList() {
-  if (!Array.isArray(db.employees)) db.employees = [];
-  return db.employees;
-}
-
-const EMP_DEPARTMENTS = ['Operaciones', 'Ventas', 'Almacén', 'Administración', 'Caja'];
-const EMP_POSITIONS = ['Cajero', 'Vendedor', 'Supervisor', 'Despachador', 'Administrador', 'Contador'];
-
-function renderEmployees() {
-  const list = employeesList();
-  const active = list.filter(e => e.status === 'active').length;
-  const payroll = list.reduce((s, e) => s + (e.salary || 0), 0);
-  const html = `
-    <div class="module-head">
-      <h3>Empleados</h3>
-      <div class="actions">
-        <button class="btn primary" id="newEmp">+ Nuevo empleado</button>
-      </div>
-    </div>
-    <div class="grid cols-4" style="margin-bottom:14px">
-      <div class="kpi"><div class="kpi-info"><div class="lbl">Total empleados</div><div class="val">${list.length}</div></div><div class="kpi-ico">${ico('employees')}</div></div>
-      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Activos</div><div class="val">${active}</div></div><div class="kpi-ico">${ico('check')}</div></div>
-      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Nómina mensual (Bs.)</div><div class="val">${fmt.esp(payroll)}</div></div><div class="kpi-ico">${ico('cxp')}</div></div>
-      <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">Departamentos</div><div class="val">${new Set(list.map(e => e.dept).filter(Boolean)).size}</div></div><div class="kpi-ico">${ico('clients')}</div></div>
-    </div>
-    <div class="dt">
-      <div class="dt-toolbar">
-        <h3>Listado de personal</h3>
-        <div class="tools"><input class="search" id="empSearch" placeholder="Buscar por nombre, cargo..." /></div>
-      </div>
-      <div class="dt-wrap">
-        <table class="dt">
-          <thead><tr><th>Código</th><th>Nombre</th><th>Cargo</th><th>Departamento</th><th>Teléfono</th><th>Email</th><th class="num">Salario (Bs.)</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="empTbody"></tbody>
-        </table>
-      </div>
-    </div>
-  `;
-  $('#dashContent').innerHTML = html;
-  paintEmployees();
-  $('#empSearch').addEventListener('input', paintEmployees);
-  $('#newEmp').addEventListener('click', () => employeeForm());
-}
-
-function paintEmployees() {
-  const q = ($('#empSearch')?.value || '').toLowerCase();
-  const list = employeesList().filter(e =>
-    !q || e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q) || e.code.toLowerCase().includes(q)
-  );
-  const tb = $('#empTbody');
-  if (!tb) return;
-  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="9" class="empty">Sin empleados</td></tr>`; return; }
-  tb.innerHTML = list.map(e => `<tr>
-    <td><code>${e.code}</code></td>
-    <td><b>${e.name}</b></td>
-    <td>${e.position}</td>
-    <td>${e.dept}</td>
-    <td>${e.phone || ''}</td>
-    <td>${e.email || ''}</td>
-    <td class="num">${fmt.esp(e.salary || 0)}</td>
-    <td>${statusPill(e.status)}</td>
-    <td class="actions-cell">
-      <button class="btn sm" data-edit="${e.id}">Editar</button>
-      <button class="btn sm" data-st="${e.id}">${e.status === 'active' ? 'Desactivar' : 'Activar'}</button>
-      <button class="btn sm danger" data-del="${e.id}">${ico('close')}</button>
-    </td>
-  </tr>`).join('');
-  $$('button[data-edit]', tb).forEach(b => b.addEventListener('click', () => employeeForm(+b.dataset.edit)));
-  $$('button[data-st]', tb).forEach(b => b.addEventListener('click', () => {
-    const e = employeesList().find(x => x.id === +b.dataset.st);
-    e.status = e.status === 'active' ? 'inactive' : 'active';
-    DB.save(db); paintEmployees(); toast('Estado actualizado', 'success');
-  }));
-  $$('button[data-del]', tb).forEach(b => b.addEventListener('click', () => {
-    if (!confirm('¿Eliminar este empleado?')) return;
-    db.employees = employeesList().filter(x => x.id !== +b.dataset.del);
-    DB.save(db); renderEmployees(); toast('Empleado eliminado', 'warn');
-  }));
-}
-
-function employeeForm(id) {
-  const e = id ? employeesList().find(x => x.id === id)
-    : { code: '', name: '', position: 'Cajero', dept: 'Operaciones', phone: '', email: '', salary: 0, status: 'active' };
-  if (!id) e.code = nextCorrelative('EMP', employeesList());
-  const posOpts = EMP_POSITIONS.map(p => `<option value="${p}" ${p === e.position ? 'selected' : ''}>${p}</option>`).join('');
-  const deptOpts = EMP_DEPARTMENTS.map(d => `<option value="${d}" ${d === e.dept ? 'selected' : ''}>${d}</option>`).join('');
-  const html = `
-    <div class="form-grid">
-      <div class="field"><label>Código</label><input id="emCode" value="${e.code}" /></div>
-      <div class="field"><label>Cédula / RIF</label><input id="emDoc" value="${e.doc || ''}" /></div>
-      <div class="field span-2"><label>Nombre completo</label><input id="emName" value="${e.name}" /></div>
-      <div class="field"><label>Cargo</label><select id="emPos">${posOpts}</select></div>
-      <div class="field"><label>Departamento</label><select id="emDept">${deptOpts}</select></div>
-      <div class="field"><label>Teléfono</label><input id="emPh" value="${e.phone || ''}" /></div>
-      <div class="field"><label>Email</label><input id="emEm" value="${e.email || ''}" /></div>
-      <div class="field"><label>Salario mensual (Bs.)</label><input inputmode="decimal" id="emSal" value="${fmt.esp(e.salary || 0)}" placeholder="0,00" /></div>
-      <div class="field"><label>Fecha de ingreso</label><input type="date" id="emDate" value="${e.hireDate || veDate()}" /></div>
-    </div>
-  `;
-  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
-                  <button class="btn primary" id="emSave">Guardar</button>`;
-  openModal({ title: id ? 'Editar empleado' : 'Nuevo empleado', body: html, footer, size: 'modal-lg' });
-  setTimeout(() => {
-    $('#emSave').addEventListener('click', () => {
-      const name = $('#emName').value.trim();
-      if (!name) { toast('El nombre es obligatorio', 'error'); return; }
-      const data = {
-        code: $('#emCode').value || e.code,
-        doc: $('#emDoc').value.trim(),
-        name,
-        position: $('#emPos').value,
-        dept: $('#emDept').value,
-        phone: $('#emPh').value.trim(),
-        email: $('#emEm').value.trim(),
-        salary: fmt.parseEsp($('#emSal').value),
-        hireDate: $('#emDate').value || veDate(),
-        status: e.status || 'active'
-      };
-      if (id) Object.assign(e, data);
-      else employeesList().push({ id: Date.now(), createdAt: veDate(), ...data });
-      DB.save(db); closeModal(); renderEmployees();
-      toast('Empleado guardado', 'success');
-    });
-  }, 60);
-}
-
-/* ============================================================
    CONTABILIDAD
    ============================================================ */
 function renderAccounting() {
@@ -1706,7 +1711,8 @@ function reportInventory() {
       </table>
     </div>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
-              <button class="btn primary" onclick="exportReport('inventario',${JSON.stringify(csvRows).replace(/"/g, '&quot;')})">Exportar CSV</button>` });
+              <button class="btn primary" onclick="reportInventoryPDF()">Descargar PDF</button>
+              <button class="btn" onclick="exportReport('inventario',${JSON.stringify(csvRows).replace(/"/g, '&quot;')})">Exportar CSV</button>` });
 }
 
 function reportSales() {
@@ -1720,7 +1726,8 @@ function reportSales() {
       </table>
     </div>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
-              <button class="btn primary" onclick="reportSalesCSV()">${ico('export')} Exportar CSV</button>` });
+              <button class="btn primary" onclick="reportSalesPDF()">Descargar PDF</button>
+              <button class="btn" onclick="reportSalesCSV()">${ico('export')} Exportar CSV</button>` });
 }
 function reportSalesCSV() {
   const rows = db.sales.map(s => [s.date, s.number, s.client, s.items, s.total.toFixed(2), s.status]);
@@ -1736,7 +1743,8 @@ function reportCxC() {
       </table>
     </div>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
-              <button class="btn primary" onclick="reportCXCCSV()">${ico('export')} Exportar CSV</button>` });
+              <button class="btn primary" onclick="reportCXCPDF()">Descargar PDF</button>
+              <button class="btn" onclick="reportCXCCSV()">${ico('export')} Exportar CSV</button>` });
 }
 function reportCXCCSV() {
   const rows = db.receivables.map(r => [r.client, r.docNumber, r.dueDate, r.total.toFixed(2), r.balance.toFixed(2), r.status]);
@@ -1755,7 +1763,8 @@ function reportPL() {
       </tbody>
     </table>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
-              <button class="btn primary" onclick="reportPLCSV()">${ico('export')} Exportar CSV</button>` });
+              <button class="btn primary" onclick="reportPLPDF()">Descargar PDF</button>
+              <button class="btn" onclick="reportPLCSV()">${ico('export')} Exportar CSV</button>` });
 }
 function reportPLCSV() {
   const i = db.accounting.filter(a => a.type === 'ingreso').reduce((s, a) => s + a.amount, 0);
@@ -1773,7 +1782,8 @@ function reportPurchases() {
       <tbody>${Object.entries(grouped).map(([s, t]) => `<tr><td>${s}</td><td class="num">${fmt.money(t)}</td><td class="num">${((t / Object.values(grouped).reduce((a, b) => a + b, 0)) * 100).toFixed(1)}%</td></tr>`).join('')}</tbody>
     </table>
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
-              <button class="btn primary" onclick="reportPurchasesCSV()">${ico('export')} Exportar CSV</button>` });
+              <button class="btn primary" onclick="reportPurchasesPDF()">Descargar PDF</button>
+              <button class="btn" onclick="reportPurchasesCSV()">${ico('export')} Exportar CSV</button>` });
 }
 function reportPurchasesCSV() {
   const grouped = {};
@@ -1805,7 +1815,8 @@ function reportTop() {
       <tbody>${top.map((p, i) => `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.category}</td><td class="num">${fmt.num(p.qty)}</td><td class="num">${fmt.money(p.rev)}</td></tr>`).join('')}</tbody>
     </table>`}
   `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
-              <button class="btn primary" onclick="reportTopCSV()">${ico('export')} Exportar CSV</button>` });
+              <button class="btn primary" onclick="reportTopPDF()">Descargar PDF</button>
+              <button class="btn" onclick="reportTopCSV()">${ico('export')} Exportar CSV</button>` });
 }
 function reportTopCSV() {
   const sold = new Map();
@@ -1822,6 +1833,118 @@ function reportTopCSV() {
     return [p ? p.code : k, p ? p.name : '(producto eliminado)', p ? p.category : '—', e.qty, e.rev.toFixed(2)];
   });
   exportReport('productos_mas_vendidos', rows.map(r => r.map(escCSV).join(',')).join('\n'), 'Codigo,Producto,Categoria,Unidades,Venta');
+}
+
+/* ---------------- Generación de PDF profesionales ---------------- */
+function reportInventoryPDF() {
+  toastPdf();
+  const plist = db.products.map(p => { canonicalizeProduct(p); return p; });
+  const total = plist.reduce((s, p) => s + invBaseWhole(p) * invDefaultPrice(p), 0);
+  const units = plist.reduce((s, p) => s + invStock(p), 0);
+  const rows = plist.map(p => [
+    p.code, p.name, p.category, invBreakdown(p, invStock(p)),
+    '$ ' + fmt.esp(invDefaultPrice(p)), fmt.money(invBaseWhole(p) * invDefaultPrice(p))
+  ]);
+  exportReportPDF({
+    title: 'Inventario',
+    subtitle: 'Valorización actual del inventario · ' + plist.length + ' productos · ' + units.toFixed(0) + ' unidades canónicas',
+    columns: ['Código', 'Producto', 'Categoría', 'Stock', 'Precio (pres. base)', 'Valor'],
+    rows,
+    align: ['left', 'left', 'left', 'center', 'right', 'right'],
+    totals: ['', 'TOTAL', '', '', '', fmt.money(total)],
+    fileName: 'reporte_inventario.pdf'
+  });
+}
+
+function reportSalesPDF() {
+  toastPdf();
+  const tot = db.sales.reduce((s, x) => s + x.total, 0);
+  const rows = db.sales.map(s => [String(s.date).slice(0, 10), s.number, s.client, s.items, fmt.money(s.total), s.status]);
+  exportReportPDF({
+    title: 'Historial de Ventas',
+    subtitle: db.sales.length + ' operaciones · Total ' + fmt.money(tot),
+    columns: ['Fecha', 'Recibo', 'Cliente', 'Items', 'Total', 'Estado'],
+    rows,
+    align: ['left', 'left', 'left', 'center', 'right', 'center'],
+    totals: ['', 'TOTAL', '', '', fmt.money(tot), ''],
+    fileName: 'reporte_ventas.pdf'
+  });
+}
+
+function reportCXCPDF() {
+  toastPdf();
+  const bal = db.receivables.reduce((s, r) => s + (r.balance || 0), 0);
+  const rows = db.receivables.map(r => [r.client, r.docNumber, fmt.date(r.dueDate), fmt.money(r.total), fmt.money(r.balance), r.status]);
+  exportReportPDF({
+    title: 'Estado de Cuentas por Cobrar (CxC)',
+    subtitle: 'Documentos registrados · Saldo total por cobrar ' + fmt.money(bal),
+    columns: ['Cliente', 'Documento', 'Vence', 'Total', 'Saldo', 'Estado'],
+    rows,
+    align: ['left', 'left', 'left', 'right', 'right', 'center'],
+    totals: ['', 'TOTAL', '', '', fmt.money(bal), ''],
+    fileName: 'estado_cxc.pdf'
+  });
+}
+
+function reportPLPDF() {
+  toastPdf();
+  const i = db.accounting.filter(a => a.type === 'ingreso').reduce((s, a) => s + a.amount, 0);
+  const e = db.accounting.filter(a => a.type === 'egreso').reduce((s, a) => s + a.amount, 0);
+  const u = i - e;
+  exportReportPDF({
+    title: 'Estado de Resultados',
+    subtitle: 'Ingresos vs Egresos del período',
+    columns: ['Concepto', 'Monto'],
+    rows: [['Ingresos', fmt.money(i)], ['(Egresos)', fmt.money(e)]],
+    align: ['left', 'right'],
+    totals: ['Utilidad Neta', fmt.money(u)],
+    note: u >= 0 ? 'El negocio presenta utilidad positiva en el período.' : 'El negocio presenta pérdida en el período.',
+    fileName: 'estado_resultados.pdf'
+  });
+}
+
+function reportPurchasesPDF() {
+  toastPdf();
+  const grouped = {};
+  db.purchases.forEach(p => { grouped[p.supplier] = (grouped[p.supplier] || 0) + p.total; });
+  const entries = Object.entries(grouped);
+  const grand = entries.reduce((s, [, t]) => s + t, 0) || 1;
+  const rows = entries.map(([s, t]) => [s, fmt.money(t), ((t / grand) * 100).toFixed(1) + '%']);
+  exportReportPDF({
+    title: 'Compras por Proveedor',
+    subtitle: 'Resumen de compras agrupado por proveedor',
+    columns: ['Proveedor', 'Total comprado', '%'],
+    rows,
+    align: ['left', 'right', 'center'],
+    totals: ['TOTAL', fmt.money(grand === 1 ? 0 : grand), '100%'],
+    fileName: 'compras_proveedor.pdf'
+  });
+}
+
+function reportTopPDF() {
+  toastPdf();
+  const sold = new Map();
+  db.sales.forEach(s => (s.lines || []).forEach(l => {
+    const k = l.pid != null ? String(l.pid) : String(l.code || '');
+    if (!k) return;
+    const e = sold.get(k) || { qty: 0, rev: 0 };
+    e.qty += Number(l.qty) || 0;
+    e.rev += (Number(l.price) || 0) * (Number(l.qty) || 0);
+    sold.set(k, e);
+  }));
+  const top = [...sold.entries()].map(([k, e]) => {
+    const p = db.products.find(x => String(x.id) === k || String(x.code) === k);
+    return { name: p ? p.name : '(producto eliminado)', cat: p ? p.category : '—', qty: e.qty, rev: e.rev };
+  }).sort((a, b) => b.qty - a.qty).slice(0, 10);
+  const rows = top.map((p, i) => [String(i + 1), p.name, p.cat, fmt.num(p.qty), fmt.money(p.rev)]);
+  exportReportPDF({
+    title: 'Productos más vendidos',
+    subtitle: 'Ranking por unidades vendidas',
+    columns: ['#', 'Producto', 'Categoría', 'Unid. vendidas', 'Venta total'],
+    rows,
+    align: ['center', 'left', 'left', 'right', 'right'],
+    fileName: 'productos_mas_vendidos.pdf'
+  });
 }
 
 function exportReport(name, csvBody, header) {
