@@ -374,49 +374,4 @@ function invSaleViews(p) {
   return invPreset(p).filter(x => x.activa).map(x => ({ unidad: x.unidad, equiv: x.equiv, precio: resolvePrice(p, x), tipo: x.tipo, base: x.base }));
 }
 
-/* ---------- Autocomprobación (consola) ---------- */
-function invDemo() {
-  console.log('===== FASE 1 · Motor de inventario =====');
-
-  const polar = Object.assign(newProductShell(), {
-    name: 'Cerveza Polar Light',
-    invBasePres: { unidad: 'Caja', contenido: 36, precio: 22.99 },
-    invBaseUnit: 'Botella',
-    stockBase: 34 * 36,
-    invPres: [
-      { unidad: 'Botella', equiv: 1, precio: 0.65, tipo: 'MANUAL' },
-      { unidad: 'Six Pack', equiv: 6, tipo: 'AUTO', precio: 0 }
-    ]
-  });
-  console.log('[Polar] stock canónico:', invStock(polar), '=', invString(polar));
-  // Venta de 20 botellas
-  invMove(polar, 1, 20, -1);
-  console.log('[Polar] -20 botellas =>', invString(polar), '| precio botella $' + resolvePrice(polar, invPresByName(polar, 'Botella')).toFixed(2));
-  // Venta de 2 cajas
-  invMove(polar, 36, 2, -1);
-  console.log('[Polar] -2 cajas =>', invString(polar));
-  // Six pack auto
-  const six = invPresByName(polar, 'Six Pack');
-  console.log('[Polar] Six Pack (auto) = $' + resolvePrice(polar, six).toFixed(2), '= 22.99/36×6');
-  // Insuficiente
-  console.log('[Polar] vender 40 cajas:', validateStock(polar, 36, 40).message);
-
-  const queso = Object.assign(newProductShell(), {
-    name: 'Queso',
-    invBasePres: { unidad: 'Kilogramo', contenido: 1000, precio: 4.30 },
-    invBaseUnit: 'Gramo',
-    stockBase: 30000,
-    invPres: [
-      { unidad: 'Kilogramo', equiv: 1000, precio: 4.30, tipo: 'MANUAL' },
-      { unidad: '500 g', equiv: 500, tipo: 'AUTO', precio: 0 },
-      { unidad: '250 g', equiv: 250, tipo: 'AUTO', precio: 0 },
-      { unidad: '100 g', equiv: 100, tipo: 'AUTO', precio: 0 }
-    ]
-  });
-  console.log('[Queso] stock canónico:', invStock(queso), '=', invString(queso));
-  invMove(queso, 2500, 1, -1); // 2.5 Kg
-  console.log('[Queso] -2.5 Kg =>', invString(queso), '| 500g auto $' + resolvePrice(queso, invPresByName(queso, '500 g')).toFixed(2));
-  console.log('===== FIN demo inventario =====');
-}
-
 ensureUnitsCatalog();

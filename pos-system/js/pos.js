@@ -21,6 +21,21 @@ const PAY_METHODS = [
 ];
 const METHOD_LBL = (k) => { const m = PAY_METHODS.find(x => x.k === k); return m ? m.lbl : k; };
 
+/* ---------- Configuración POS vigente ---------- */
+const posCfg = () => (db.settings && db.settings.pos) || {};
+
+/* Cliente por defecto configurado (ajuste POS 'defaultCustomer'). */
+function defaultCustomerClient() {
+  const name = String((posCfg().defaultCustomer || 'Consumidor Final')).trim();
+  return db.clients.find(c => String(c.name || '').toLowerCase() === name.toLowerCase())
+    || db.clients.find(c => /consumidor final/i.test(String(c.name || '')))
+    || db.clients[0];
+}
+/* Indica si el cliente vinculado es el genérico "Consumidor Final" (aún no se eligió uno real). */
+function isDefaultCustomer(c) {
+  return !c || /consumidor final/i.test(String(c.name || '')) || String(c.code || '') === '99999999999';
+}
+
 let posUiBound = false;
 
 function renderPOS() {
@@ -199,7 +214,6 @@ function posAction(fn) {
     search: posSearch,
     link: posLink,
     quantity: posQuantity,
-    scale: posScale,
     return: posReturn,
     clear: posClearCart,
     pending: posPendingList,
@@ -355,37 +369,6 @@ function posQuantity() {
   }, 60);
 }
 
-/* F5 — Lectura de balanza */
-function posScale() {
-  const weighed = ticket.items.map((it, idx) => ({ idx, it })).filter(x => x.it.weighed);
-  if (weighed.length === 0) { toast('No hay productos pesados en el ticket. Agréguelo primero (F2)', 'warn'); return; }
-  const html = `
-    <div class="field">
-      <label>Item pesado</label>
-      <select id="scItem">${weighed.map((x, i) => `<option value="${x.idx}">${i + 1}. ${x.it.name}</option>`).join('')}</select>
-    </div>
-    <div class="field">
-      <label>Peso leído (kg)</label>
-      <input id="scWeight" type="number" step="0.001" min="0" value="1.000" autofocus />
-    </div>
-    <p style="color:#6b7280;font-size:12px">Simula la lectura del peso desde la balanza.</p>
-  `;
-  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
-                  <button class="btn primary" id="scOk">Aplicar</button>`;
-  openModal({ title: 'F5 — Balanza', body: html, footer });
-  setTimeout(() => {
-    $('#scOk').addEventListener('click', () => {
-      const i = +$('#scItem').value;
-      const w = parseFloat($('#scWeight').value) || 0;
-      ticket.items[i].qty = w;
-      ticket.items[i].weighed = true;
-      renderTicketTable();
-      closeModal();
-      toast(`Peso aplicado: ${w} kg`, 'success');
-    });
-  }, 60);
-}
-
 function refundsAll() { if (!Array.isArray(db.refunds)) db.refunds = []; return db.refunds; }
 
 /* Registra un reembolso (parcial o total) de una venta. qtyArray: cant. a devolver por línea (0 = no). */
@@ -483,11 +466,20 @@ function posPending() {
 }
 
 function loadPending() {
-  try { return JSON.parse(localStorage.getItem('possystem_pending') || '[]'); }
-  catch (e) { return []; }
+  // Los tickets pendientes viven dentro de `db` (entran en respaldo JSON y SQLite).
+  if (!Array.isArray(db.pendingSales)) {
+    // Migración única: adopta los pendientes guardados con el esquema viejo (localStorage).
+    let mig = [];
+    try { mig = JSON.parse(localStorage.getItem('possystem_pending') || '[]'); } catch (e) { mig = []; }
+    db.pendingSales = mig;
+    try { localStorage.removeItem('possystem_pending'); } catch (e) {}
+    if (mig.length) DB.save(db);
+  }
+  return db.pendingSales;
 }
 function savePending(list) {
-  localStorage.setItem('possystem_pending', JSON.stringify(list));
+  db.pendingSales = list;
+  DB.save(db);
 }
 
 /* Retoma una venta pendiente/suspendida (carga items, cliente y número). */
@@ -618,6 +610,11 @@ function printReceipt() {
 
 function posCheckout() {
   if (ticket.items.length === 0) { toast('El ticket está vacío', 'warn'); return; }
+  // Requerir cliente (ajuste POS): no dejar cobrar con el cliente genérico por defecto.
+  if (posCfg().requireCustomer && isDefaultCustomer(ticket.customer)) {
+    toast('Debe vincular un cliente real antes de cobrar (F3/F12).', 'warn', 3400);
+    posLink(); return;
+  }
   const { lines, base, tax, subtotal, RW } = getReceiptLines();
   const rpText = lines.join('\n');
   const rate = fmt.usdRate() || 36;
@@ -759,11 +756,14 @@ function finalizeSale(total, base, tax, payData) {
   };
   db.sales.unshift(sale);
   // Descontar stock en la UNIDAD CANÓNICA (fuente única): it.content = equiv (unidades canónicas por presentación vendida)
+  const allowNeg = !!posCfg().allowNegativeStock;
   ticket.items.forEach(it => {
     const pr = db.products.find(x => x.id === it.id);
     if (pr) {
       canonicalizeProduct(pr);
-      pr.stockBase = Math.max(0, invStock(pr) - (it.qty * (it.content || 1)));
+      const newStock = invStock(pr) - (it.qty * (it.content || 1));
+      // Si no se permiten negativos, se corta en 0 (comportamiento por defecto).
+      pr.stockBase = allowNeg ? newStock : Math.max(0, newStock);
     }
   });
   // Si es crédito, generar CxC y acumular la deuda del cliente
@@ -813,7 +813,7 @@ function finalizeSale(total, base, tax, payData) {
 
 function resetTicket() {
   ticket.items = [];
-  ticket.customer = db.clients.find(c => c.name === 'Consumidor Final') || db.clients[0];
+  ticket.customer = defaultCustomerClient();
   ticket.number = '0100' + String(db.settings.invoice.nextNumber).padStart(4, '0');
   $('#rcptCustomerCode').textContent = ticket.customer.code;
   $('#rcptCustomerName').textContent = ticket.customer.name;
@@ -829,9 +829,10 @@ function resetTicket() {
 /* Vaciar el carrito actual y volver al cliente por defecto */
 function posClearCart() {
   const n = ticket.items.length;
+  const nm = defaultCustomerClient() ? defaultCustomerClient().name : 'Consumidor Final';
   resetTicket();
-  if (n > 0) toast('Carrito vaciado · Cliente: Consumidor Final', 'success');
-  else toast('El carrito ya está vacío · Cliente: Consumidor Final', 'info');
+  if (n > 0) toast('Carrito vaciado · Cliente: ' + nm, 'success');
+  else toast('El carrito ya está vacío · Cliente: ' + nm, 'info');
 }
 
 /* Cobranza: cobrar total o parcial de la deuda del cliente vinculado */
@@ -1253,9 +1254,31 @@ function posReportZ() {
     </div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cerrar</button>
+                  <button class="btn" id="zClose" ${jorn?.active ? '' : 'disabled title="La jornada ya está cerrada"'}>${ico('reports')} ${jorn?.active ? 'Cerrar jornada' : 'Jornada cerrada'}</button>
                   <button class="btn primary" id="zPrint">${ico('print')} Imprimir Reporte Z</button>`;
   openModal({ title: 'Reporte Z — Cierre del día', body: html, footer, size: 'modal-lg' });
   setTimeout(() => {
+    const zc = $('#zClose');
+    if (zc) zc.addEventListener('click', () => {
+      if (!jorn || !jorn.active) { toast('La jornada ya se encuentra cerrada', 'warn'); return; }
+      if (!confirm('¿Cerrar la jornada y registrar este Reporte Z? No podrá facturar a menos que apertura de nuevo.')) return;
+      if (!Array.isArray(db.jornadaZ)) db.jornadaZ = [];
+      db.jornadaZ.unshift({
+        id: (db.jornadaZ.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0)) + 1,
+        date: today, closedAt: veStamp(), cajero: session?.user?.name || 'Cajero', tasa,
+        nVentas, nArt, base, iva, total: totalVentas,
+        contado, credito, reemb,
+        fondosBs: fBs, fondosUsd: fUsd,
+        totalEfecBs, totalEfecUsd,
+        ingCaja: cajaIng, egrCaja: cajaEgr,
+        methods: Object.keys(amtM).map(k => ({ k, usd: amtM[k] }))
+      });
+      jorn.active = false;
+      jorn.closedAt = veStamp();
+      DB.save(db);
+      toast('Jornada cerrada · Reporte Z registrado', 'success');
+      posReportZ();
+    });
     $('#zPrint').addEventListener('click', () => {
       const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       printHtml(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte Z ${today}</title><style>
@@ -1747,8 +1770,11 @@ function openQtyCanonical(p, view) {
       const q = qv(qEl);
       const consume = q * (view.equiv || 1);
       if (q <= 0) { toast('Indique una cantidad mayor que cero', 'warn'); return; }
-      const chk = validateStock(p, view.equiv || 1, q);
-      if (!chk.ok) { toast(chk.message, 'warn', 3200); return; }
+      // La validación de stock puede desactivarse (ajuste POS 'allowNegativeStock').
+      if (!posCfg().allowNegativeStock) {
+        const chk = validateStock(p, view.equiv || 1, q);
+        if (!chk.ok) { toast(chk.message, 'warn', 3200); return; }
+      }
       addCanonicalLine(p, view, q);
       closeModal();
       const consTx = fmtNumStock(consume) + ' ' + unitAbbr(invBaseUnit(p), consume);

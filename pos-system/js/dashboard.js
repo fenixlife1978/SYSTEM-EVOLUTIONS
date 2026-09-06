@@ -43,7 +43,7 @@ document.addEventListener('click', (e) => {
    ============================================================ */
 function renderOverview() {
   const today = veDate();
-  const todaySales = db.sales.filter(s => s.date.startsWith(today.replace(/-/g, '/')));
+  const todaySales = db.sales.filter(s => s.date.startsWith(today));
   const todayTotal = todaySales.reduce((s, x) => s + x.total, 0);
   const monthSales = db.sales.filter(s => s.date.startsWith(today.slice(0, 7)));
   const monthTotal = monthSales.reduce((s, x) => s + x.total, 0);
@@ -153,10 +153,8 @@ function renderSalesChart() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const key = d.toISOString().slice(0, 10);
-    const total = db.sales.filter(s => s.date.startsWith(key.replace(/-/g, '/'))).reduce((s, x) => s + x.total, 0);
-    // generar datos de demo si está vacío
-    const final = total > 0 ? total : (2000 + Math.random() * 6000);
-    days.push({ label: d.toLocaleDateString('es-VE', { weekday: 'short' }).slice(0, 3), value: final });
+    const total = db.sales.filter(s => s.date.startsWith(key)).reduce((s, x) => s + x.total, 0);
+    days.push({ label: d.toLocaleDateString('es-VE', { weekday: 'short' }).slice(0, 3), value: total });
   }
   const max = Math.max(...days.map(d => d.value)) || 1;
   return `
@@ -168,10 +166,31 @@ function renderSalesChart() {
 }
 
 function renderTopProducts() {
-  // Tomamos productos con más stock canónico como "top" demo
-  const top = db.products.map(p => { canonicalizeProduct(p); return p; }).sort((a, b) => invStock(b) - invStock(a)).slice(0, 5);
+  const month = veDate().slice(0, 7);
+  // Agrupar por producto lo realmente vendido (en unidades base) en el mes en curso.
+  const sold = new Map();
+  db.sales.filter(s => s.date.startsWith(month)).forEach(s =>
+    (s.lines || []).forEach(l => {
+      const key = l.pid != null ? String(l.pid) : String(l.code || '');
+      if (!key) return;
+      const e = sold.get(key) || { qty: 0, rev: 0 };
+      e.qty += Number(l.qty) || 0;
+      e.rev += (Number(l.price) || 0) * (Number(l.qty) || 0);
+      sold.set(key, e);
+    })
+  );
+  const rows = [...sold.entries()]
+    .map(([key, e]) => {
+      const pr = db.products.find(p => String(p.id) === key || String(p.code) === key);
+      return { key, name: pr ? pr.name : '(producto eliminado)', code: pr ? pr.code : key, category: pr ? pr.category : '—', ...e };
+    })
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 5);
+
+  if (!rows.length) return '<div class="activity"><div class="dt empty">Aún no hay ventas registradas este mes.</div></div>';
+
   return `<div class="activity">
-    ${top.map((p, i) => `
+    ${rows.map((p, i) => `
       <div class="item">
         <div class="dot" style="background:var(--green)">${i + 1}</div>
         <div class="body">
@@ -179,8 +198,8 @@ function renderTopProducts() {
           <small>${p.code} · ${p.category}</small>
         </div>
         <div style="text-align:right">
-          <b>${fmt.moneyDyn(invUnitPrice(p))}</b>
-          <small style="display:block;color:#6b7280">${invBreakdown(p, invStock(p))}</small>
+          <b>${fmt.moneyDyn(p.rev)}</b>
+          <small style="display:block;color:#6b7280">${fmt.num(p.qty)} unds. vendidas</small>
         </div>
       </div>`).join('')}
   </div>`;

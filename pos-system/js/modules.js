@@ -1240,9 +1240,22 @@ function supplierForm(id) {
 }
 
 /* ============================================================
-   EMPLEADOS
+   EMPLEADOS (gestión de personal / nómina)
+   Colección propia db.employees, independiente de los usuarios
+   de acceso al sistema (login).
    ============================================================ */
+function employeesList() {
+  if (!Array.isArray(db.employees)) db.employees = [];
+  return db.employees;
+}
+
+const EMP_DEPARTMENTS = ['Operaciones', 'Ventas', 'Almacén', 'Administración', 'Caja'];
+const EMP_POSITIONS = ['Cajero', 'Vendedor', 'Supervisor', 'Despachador', 'Administrador', 'Contador'];
+
 function renderEmployees() {
+  const list = employeesList();
+  const active = list.filter(e => e.status === 'active').length;
+  const payroll = list.reduce((s, e) => s + (e.salary || 0), 0);
   const html = `
     <div class="module-head">
       <h3>Empleados</h3>
@@ -1250,14 +1263,20 @@ function renderEmployees() {
         <button class="btn primary" id="newEmp">+ Nuevo empleado</button>
       </div>
     </div>
+    <div class="grid cols-4" style="margin-bottom:14px">
+      <div class="kpi"><div class="kpi-info"><div class="lbl">Total empleados</div><div class="val">${list.length}</div></div><div class="kpi-ico">${ico('employees')}</div></div>
+      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Activos</div><div class="val">${active}</div></div><div class="kpi-ico">${ico('check')}</div></div>
+      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Nómina mensual (Bs.)</div><div class="val">${fmt.esp(payroll)}</div></div><div class="kpi-ico">${ico('cxp')}</div></div>
+      <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">Departamentos</div><div class="val">${new Set(list.map(e => e.dept).filter(Boolean)).size}</div></div><div class="kpi-ico">${ico('clients')}</div></div>
+    </div>
     <div class="dt">
       <div class="dt-toolbar">
         <h3>Listado de personal</h3>
-        <div class="tools"><input class="search" id="empSearch" placeholder="Buscar..." /></div>
+        <div class="tools"><input class="search" id="empSearch" placeholder="Buscar por nombre, cargo..." /></div>
       </div>
       <div class="dt-wrap">
         <table class="dt">
-          <thead><tr><th>Código</th><th>Nombre</th><th>Cargo</th><th>Departamento</th><th>Email</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Código</th><th>Nombre</th><th>Cargo</th><th>Departamento</th><th>Teléfono</th><th>Email</th><th class="num">Salario (Bs.)</th><th>Estado</th><th></th></tr></thead>
           <tbody id="empTbody"></tbody>
         </table>
       </div>
@@ -1270,29 +1289,85 @@ function renderEmployees() {
 }
 
 function paintEmployees() {
-  // Generamos empleados desde los usuarios con role cashier, supervisor, etc.
-  const list = db.users.map(u => ({
-    code: 'EMP-' + String(u.id).padStart(3, '0'),
-    name: u.name, position: u.role, dept: u.branch, email: u.email, status: u.status
-  }));
   const q = ($('#empSearch')?.value || '').toLowerCase();
-  const filtered = list.filter(e => !q || e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q));
+  const list = employeesList().filter(e =>
+    !q || e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q) || e.code.toLowerCase().includes(q)
+  );
   const tb = $('#empTbody');
   if (!tb) return;
-  if (filtered.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">Sin empleados</td></tr>`; return; }
-  tb.innerHTML = filtered.map(e => `<tr>
+  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="9" class="empty">Sin empleados</td></tr>`; return; }
+  tb.innerHTML = list.map(e => `<tr>
     <td><code>${e.code}</code></td>
-    <td>${e.name}</td>
+    <td><b>${e.name}</b></td>
     <td>${e.position}</td>
     <td>${e.dept}</td>
-    <td>${e.email}</td>
+    <td>${e.phone || ''}</td>
+    <td>${e.email || ''}</td>
+    <td class="num">${fmt.esp(e.salary || 0)}</td>
     <td>${statusPill(e.status)}</td>
-    <td class="actions-cell"><button class="btn sm">Ver</button></td>
+    <td class="actions-cell">
+      <button class="btn sm" data-edit="${e.id}">Editar</button>
+      <button class="btn sm" data-st="${e.id}">${e.status === 'active' ? 'Desactivar' : 'Activar'}</button>
+      <button class="btn sm danger" data-del="${e.id}">${ico('close')}</button>
+    </td>
   </tr>`).join('');
+  $$('button[data-edit]', tb).forEach(b => b.addEventListener('click', () => employeeForm(+b.dataset.edit)));
+  $$('button[data-st]', tb).forEach(b => b.addEventListener('click', () => {
+    const e = employeesList().find(x => x.id === +b.dataset.st);
+    e.status = e.status === 'active' ? 'inactive' : 'active';
+    DB.save(db); paintEmployees(); toast('Estado actualizado', 'success');
+  }));
+  $$('button[data-del]', tb).forEach(b => b.addEventListener('click', () => {
+    if (!confirm('¿Eliminar este empleado?')) return;
+    db.employees = employeesList().filter(x => x.id !== +b.dataset.del);
+    DB.save(db); renderEmployees(); toast('Empleado eliminado', 'warn');
+  }));
 }
 
-function employeeForm() {
-  toast('Formulario de empleado en construcción. Use el módulo de Usuarios para gestión rápida.', 'info', 3000);
+function employeeForm(id) {
+  const e = id ? employeesList().find(x => x.id === id)
+    : { code: '', name: '', position: 'Cajero', dept: 'Operaciones', phone: '', email: '', salary: 0, status: 'active' };
+  if (!id) e.code = nextCorrelative('EMP', employeesList());
+  const posOpts = EMP_POSITIONS.map(p => `<option value="${p}" ${p === e.position ? 'selected' : ''}>${p}</option>`).join('');
+  const deptOpts = EMP_DEPARTMENTS.map(d => `<option value="${d}" ${d === e.dept ? 'selected' : ''}>${d}</option>`).join('');
+  const html = `
+    <div class="form-grid">
+      <div class="field"><label>Código</label><input id="emCode" value="${e.code}" /></div>
+      <div class="field"><label>Cédula / RIF</label><input id="emDoc" value="${e.doc || ''}" /></div>
+      <div class="field span-2"><label>Nombre completo</label><input id="emName" value="${e.name}" /></div>
+      <div class="field"><label>Cargo</label><select id="emPos">${posOpts}</select></div>
+      <div class="field"><label>Departamento</label><select id="emDept">${deptOpts}</select></div>
+      <div class="field"><label>Teléfono</label><input id="emPh" value="${e.phone || ''}" /></div>
+      <div class="field"><label>Email</label><input id="emEm" value="${e.email || ''}" /></div>
+      <div class="field"><label>Salario mensual (Bs.)</label><input inputmode="decimal" id="emSal" value="${fmt.esp(e.salary || 0)}" placeholder="0,00" /></div>
+      <div class="field"><label>Fecha de ingreso</label><input type="date" id="emDate" value="${e.hireDate || veDate()}" /></div>
+    </div>
+  `;
+  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
+                  <button class="btn primary" id="emSave">Guardar</button>`;
+  openModal({ title: id ? 'Editar empleado' : 'Nuevo empleado', body: html, footer, size: 'modal-lg' });
+  setTimeout(() => {
+    $('#emSave').addEventListener('click', () => {
+      const name = $('#emName').value.trim();
+      if (!name) { toast('El nombre es obligatorio', 'error'); return; }
+      const data = {
+        code: $('#emCode').value || e.code,
+        doc: $('#emDoc').value.trim(),
+        name,
+        position: $('#emPos').value,
+        dept: $('#emDept').value,
+        phone: $('#emPh').value.trim(),
+        email: $('#emEm').value.trim(),
+        salary: fmt.parseEsp($('#emSal').value),
+        hireDate: $('#emDate').value || veDate(),
+        status: e.status || 'active'
+      };
+      if (id) Object.assign(e, data);
+      else employeesList().push({ id: Date.now(), createdAt: veDate(), ...data });
+      DB.save(db); closeModal(); renderEmployees();
+      toast('Empleado guardado', 'success');
+    });
+  }, 60);
 }
 
 /* ============================================================
@@ -1436,12 +1511,13 @@ function renderCashbox() {
     <div class="module-head">
       <h3>Caja y Bancos</h3>
       <div class="actions">
+        <button class="btn" id="zHist">${ico('reports')} Cierres Z</button>
         <button class="btn primary" id="newCash">+ Movimiento de caja</button>
       </div>
     </div>
     <div class="grid cols-3" style="margin-bottom:14px">
-      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Caja actual</div><div class="val">${fmt.money(200 + db.cashbox.reduce((s, c) => s + c.amount, 0))}</div></div><div class="kpi-ico">${ico('cash')}</div></div>
-      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Banco</div><div class="val">${fmt.money(58420)}</div></div><div class="kpi-ico">${ico('cashbox')}</div></div>
+      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Caja neto (USD)</div><div class="val">${fmt.money(db.cashbox.reduce((s, c) => s + (Number(c.amount) || 0), 0))}</div></div><div class="kpi-ico">${ico('cash')}</div></div>
+      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Aperturas</div><div class="val">${db.cashbox.filter(c => c.type === 'apertura').length}</div></div><div class="kpi-ico">${ico('cashbox')}</div></div>
       <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">Movimientos</div><div class="val">${db.cashbox.length}</div></div><div class="kpi-ico">${ico('refresh')}</div></div>
     </div>
     <div class="dt">
@@ -1463,6 +1539,80 @@ function renderCashbox() {
     <td class="num" style="color:${c.amount >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700">${c.amount >= 0 ? '+' : ''}${fmt.money(c.amount)}</td>
   </tr>`).join('');
   $('#newCash').addEventListener('click', cashForm);
+  const zh = $('#zHist'); if (zh) zh.addEventListener('click', () => posZHistory());
+}
+
+function posZHistory() {
+  const list = Array.isArray(db.jornadaZ) ? db.jornadaZ : [];
+  const body = list.length === 0
+    ? '<div class="dt empty">Aún no hay cierres de jornada (Reportes Z) registrados.</div>'
+    : `<table class="dt" style="width:100%"><thead><tr><th>Fecha</th><th>Cerró</th><th>Ventas</th><th>N°</th><th class="num">Total</th><th>Efec. Bs</th><th>Efec. USD</th><th></th></tr></thead><tbody>
+        ${list.map(z => `
+          <tr>
+            <td>${String(z.date || z.closedAt || '').slice(0, 10)}</td>
+            <td>${z.cajero || '—'}</td>
+            <td>${z.nVentas ?? '—'}</td>
+            <td>${z.nArt ?? '—'}</td>
+            <td class="num"><b>${fmt.money(z.total || 0)}</b></td>
+            <td class="num">Bs. ${fmt.esp(z.totalEfecBs || 0)}</td>
+            <td class="num">${fmt.money(z.totalEfecUsd || 0)}</td>
+            <td class="actions-cell"><button class="btn sm" data-zv="${z.id}">Ver</button></td>
+          </tr>`).join('')}
+      </tbody></table>`;
+  const footer = `<button class="btn" onclick="closeModal()">Cerrar</button>`;
+  openModal({ title: 'Historial de cierres (Reporte Z)', body, footer, size: 'modal-lg' });
+  setTimeout(() => {
+    $$('button[data-zv]').forEach(b => b.addEventListener('click', () => posZHistoryDetail(+b.dataset.zv)));
+  }, 60);
+}
+
+function posZHistoryDetail(id) {
+  const z = (Array.isArray(db.jornadaZ) ? db.jornadaZ : []).find(x => x.id === id);
+  if (!z) return;
+  const padM = (l, v) => String(l).padEnd(18) + String(v).padStart(14);
+  const lns = [];
+  const push = (s) => lns.push(s);
+  push('     POSsystem Evolution       ');
+  push('   Reporte Z (histórico)       ');
+  push(' ');
+  push('Fecha  : ' + String(z.closedAt || z.date || ''));
+  push('Cajero : ' + (z.cajero || '—'));
+  push('==================================');
+  push('Ventas del día : ' + (z.nVentas ?? 0));
+  push('Artículos      : ' + (z.nArt ?? 0));
+  push('----------------------------------');
+  push(padM('Base', fmt.money(z.base || 0)));
+  push(padM('IVA', fmt.money(z.iva || 0)));
+  push(padM('TOTAL VENTAS', fmt.money(z.total || 0)));
+  push('----------------------------------');
+  push(padM('Contado', fmt.money(z.contado || 0)));
+  push(padM('Crédito (CxC)', fmt.money(z.credito || 0)));
+  push(padM('Reembolsos', fmt.money(z.reemb || 0)));
+  push('==================================');
+  push(padM('Fondo inicial Bs.', 'Bs. ' + fmt.esp(z.fondosBs || 0)));
+  push(padM('TOTAL Efec. Bs.', 'Bs. ' + fmt.esp(z.totalEfecBs || 0)));
+  push('----------------------------------');
+  push(padM('Fondo inicial USD', fmt.money(z.fondosUsd || 0)));
+  push(padM('TOTAL Efec. USD', fmt.money(z.totalEfecUsd || 0)));
+  push('==================================');
+  if (Array.isArray(z.methods) && z.methods.length) {
+    push('VENTAS POR METODO DE PAGO');
+    z.methods.forEach(m => { const lbl = METHOD_LBL ? METHOD_LBL(m.k) : m.k; push('  ' + String(lbl).padEnd(16) + fmt.esp(m.usd).padStart(12)); });
+    push('==================================');
+  }
+  const esc = lns.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const footer = `<button class="btn" onclick="closeModal()">Volver</button>
+                  <button class="btn primary" id="zvPrint">${ico('print')} Imprimir</button>`;
+  openModal({ title: 'Reporte Z — ' + (z.date || ''), body: `<div class="z-report-preview"><span style="white-space:pre">${esc}</span></div>`, footer });
+  setTimeout(() => {
+    $('#zvPrint').addEventListener('click', () => {
+      printHtml(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte Z ${z.date || ''}</title><style>
+        @page { size: 80mm auto; margin: 0; } html,body { margin:0; padding:0; }
+        body { font-family:'Courier New',monospace; font-size:11px; width:72mm; } .l { white-space:pre; }
+      </style></head><body>${esc.split('\n').map(l => `<div class="l">${l}</div>`).join('')}</body></html>`);
+      toast('Imprimiendo Reporte Z', 'success');
+    });
+  }, 60);
 }
 
 function cashForm() {
@@ -1572,7 +1722,12 @@ function reportSales() {
         <tbody>${db.sales.map(s => `<tr><td>${s.date}</td><td><code>${s.number}</code></td><td>${s.client}</td><td class="num">${s.items}</td><td class="num">${fmt.money(s.total)}</td><td>${statusPill(s.status)}</td></tr>`).join('')}</tbody>
       </table>
     </div>
-  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>` });
+  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
+              <button class="btn primary" onclick="reportSalesCSV()">${ico('export')} Exportar CSV</button>` });
+}
+function reportSalesCSV() {
+  const rows = db.sales.map(s => [s.date, s.number, s.client, s.items, s.total.toFixed(2), s.status]);
+  exportReport('reporte_ventas', rows.map(r => r.map(escCSV).join(',')).join('\n'), 'Fecha,Recibo,Cliente,Items,Total,Estado');
 }
 
 function reportCxC() {
@@ -1583,7 +1738,12 @@ function reportCxC() {
         <tbody>${db.receivables.map(r => `<tr><td>${r.client}</td><td><code>${r.docNumber}</code></td><td>${fmt.date(r.dueDate)}</td><td class="num">${fmt.money(r.total)}</td><td class="num"><b>${fmt.money(r.balance)}</b></td><td>${statusPill(r.status)}</td></tr>`).join('')}</tbody>
       </table>
     </div>
-  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>` });
+  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
+              <button class="btn primary" onclick="reportCXCCSV()">${ico('export')} Exportar CSV</button>` });
+}
+function reportCXCCSV() {
+  const rows = db.receivables.map(r => [r.client, r.docNumber, r.dueDate, r.total.toFixed(2), r.balance.toFixed(2), r.status]);
+  exportReport('estado_cxc', rows.map(r => r.map(escCSV).join(',')).join('\n'), 'Cliente,Documento,Vence,Total,Saldo,Estado');
 }
 
 function reportPL() {
@@ -1597,7 +1757,14 @@ function reportPL() {
         <tr class="row-total"><td><b>UTILIDAD NETA</b></td><td class="num" style="font-size:18px;color:${i-e>=0?'var(--green)':'var(--red)'}">${fmt.money(i - e)}</td></tr>
       </tbody>
     </table>
-  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>` });
+  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
+              <button class="btn primary" onclick="reportPLCSV()">${ico('export')} Exportar CSV</button>` });
+}
+function reportPLCSV() {
+  const i = db.accounting.filter(a => a.type === 'ingreso').reduce((s, a) => s + a.amount, 0);
+  const e = db.accounting.filter(a => a.type === 'egreso').reduce((s, a) => s + a.amount, 0);
+  const u = i - e;
+  exportReport('estado_resultados', [['Ingresos', i], ['Egresos', e], ['Utilidad neta', u]].map(r => r.map(escCSV).join(',')).join('\n'), 'Concepto,Monto');
 }
 
 function reportPurchases() {
@@ -1608,26 +1775,67 @@ function reportPurchases() {
       <thead><tr><th>Proveedor</th><th class="num">Total comprado</th><th class="num">%</th></tr></thead>
       <tbody>${Object.entries(grouped).map(([s, t]) => `<tr><td>${s}</td><td class="num">${fmt.money(t)}</td><td class="num">${((t / Object.values(grouped).reduce((a, b) => a + b, 0)) * 100).toFixed(1)}%</td></tr>`).join('')}</tbody>
     </table>
-  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>` });
+  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
+              <button class="btn primary" onclick="reportPurchasesCSV()">${ico('export')} Exportar CSV</button>` });
+}
+function reportPurchasesCSV() {
+  const grouped = {};
+  db.purchases.forEach(p => { grouped[p.supplier] = (grouped[p.supplier] || 0) + p.total; });
+  const tot = Object.values(grouped).reduce((a, b) => a + b, 0) || 1;
+  const rows = Object.entries(grouped).map(([s, t]) => [s, t.toFixed(2), ((t / tot) * 100).toFixed(1) + '%']);
+  exportReport('compras_proveedor', rows.map(r => r.map(escCSV).join(',')).join('\n'), 'Proveedor,Total,%');
 }
 
 function reportTop() {
-  const top = db.products.map(p => { canonicalizeProduct(p); return p; }).sort((a, b) => invStock(b) - invStock(a)).slice(0, 10);
-  openModal({ title: 'Top 10 productos', body: `
-    <table class="dt" style="width:100%">
-      <thead><tr><th>#</th><th>Producto</th><th>Categoría</th><th>Stock</th><th class="num">Precio/unidad</th></tr></thead>
-      <tbody>${top.map((p, i) => `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.category}</td><td>${invStock(p)} ${invBaseUnit(p)}</td><td class="num">${fmt.moneyDyn(invUnitPrice(p))}</td></tr>`).join('')}</tbody>
-    </table>
-  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>` });
+  // Ranking real por unidades vendidas (agrega las líneas de todas las ventas).
+  const sold = new Map();
+  db.sales.forEach(s => (s.lines || []).forEach(l => {
+    const k = l.pid != null ? String(l.pid) : String(l.code || '');
+    if (!k) return;
+    const e = sold.get(k) || { qty: 0, rev: 0 };
+    e.qty += Number(l.qty) || 0;
+    e.rev += (Number(l.price) || 0) * (Number(l.qty) || 0);
+    sold.set(k, e);
+  }));
+  const top = [...sold.entries()].map(([k, e]) => {
+    const p = db.products.find(x => String(x.id) === k || String(x.code) === k);
+    return { name: p ? p.name : '(producto eliminado)', category: p ? p.category : '—', code: p ? p.code : k, qty: e.qty, rev: e.rev };
+  }).sort((a, b) => b.qty - a.qty).slice(0, 10);
+  openModal({ title: 'Productos más vendidos', size: 'modal-lg', body: `
+    ${top.length === 0 ? '<div class="dt empty">Sin ventas registradas</div>'
+      : `<table class="dt" style="width:100%">
+      <thead><tr><th>#</th><th>Producto</th><th>Categoría</th><th class="num">Unid. vendidas</th><th class="num">Venta total</th></tr></thead>
+      <tbody>${top.map((p, i) => `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.category}</td><td class="num">${fmt.num(p.qty)}</td><td class="num">${fmt.money(p.rev)}</td></tr>`).join('')}</tbody>
+    </table>`}
+  `, footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
+              <button class="btn primary" onclick="reportTopCSV()">${ico('export')} Exportar CSV</button>` });
+}
+function reportTopCSV() {
+  const sold = new Map();
+  db.sales.forEach(s => (s.lines || []).forEach(l => {
+    const k = l.pid != null ? String(l.pid) : String(l.code || '');
+    if (!k) return;
+    const e = sold.get(k) || { qty: 0, rev: 0 };
+    e.qty += Number(l.qty) || 0;
+    e.rev += (Number(l.price) || 0) * (Number(l.qty) || 0);
+    sold.set(k, e);
+  }));
+  const rows = [...sold.entries()].map(([k, e]) => {
+    const p = db.products.find(x => String(x.id) === k || String(x.code) === k);
+    return [p ? p.code : k, p ? p.name : '(producto eliminado)', p ? p.category : '—', e.qty, e.rev.toFixed(2)];
+  });
+  exportReport('productos_mas_vendidos', rows.map(r => r.map(escCSV).join(',')).join('\n'), 'Codigo,Producto,Categoria,Unidades,Venta');
 }
 
-function exportReport(name, csvBody) {
-  const csv = 'Codigo,Descripcion,Categoria,Stock,Precio,Valor\n' + csvBody;
-  const blob = new Blob([csv], { type: 'text/csv' });
+function exportReport(name, csvBody, header) {
+  const h = header || 'Codigo,Descripcion,Categoria,Stock,Precio,Valor';
+  const csv = h + '\n' + csvBody;
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name + '.csv'; a.click();
   toast('Reporte exportado', 'success');
 }
+function escCSV(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }
 
 /* ============================================================
    USUARIOS
@@ -1785,7 +1993,6 @@ function renderSettings() {
         <h3 class="card-title">Comportamiento del POS</h3>
         <div class="form-grid">
           <div class="field"><label><input type="checkbox" id="poPrint" ${s.pos.printAfterSale ? 'checked' : ''}/> Imprimir recibo al cobrar</label></div>
-          <div class="field"><label><input type="checkbox" id="poDrw" ${s.pos.openDrawerAfterSale ? 'checked' : ''}/> Abrir gaveta al cobrar</label></div>
           <div class="field"><label><input type="checkbox" id="poReq" ${s.pos.requireCustomer ? 'checked' : ''}/> Requerir cliente</label></div>
           <div class="field"><label><input type="checkbox" id="poNeg" ${s.pos.allowNegativeStock ? 'checked' : ''}/> Permitir stock negativo</label></div>
           <div class="field"><label>Cliente por defecto</label><input id="poCus" value="${s.pos.defaultCustomer}" /></div>
@@ -1899,7 +2106,6 @@ function renderSettings() {
     });
     if (tab === 'pos') $('#savePo')?.addEventListener('click', () => {
       s.pos.printAfterSale = $('#poPrint').checked;
-      s.pos.openDrawerAfterSale = $('#poDrw').checked;
       s.pos.requireCustomer = $('#poReq').checked;
       s.pos.allowNegativeStock = $('#poNeg').checked;
       s.pos.defaultCustomer = $('#poCus').value;

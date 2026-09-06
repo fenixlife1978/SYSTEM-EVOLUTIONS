@@ -20,11 +20,14 @@ const seedData = {
 
   suppliers: [],
 
+  employees: [],
+
   receivables: [],
   payables: [],
   purchases: [],
   sales: [],
   refunds: [],
+  pendingSales: [],
   accounting: [],
   cashbox: [],
 
@@ -48,9 +51,8 @@ const seedData = {
     invoice: { prefix: '0100', nextNumber: 1, decimals: 2 },
     pos: {
       printAfterSale: false,
-      openDrawerAfterSale: false,
       requireCustomer: false,
-      defaultCustomer: 'Cliente',
+      defaultCustomer: 'Consumidor Final',
       allowNegativeStock: false,
       currencySymbol: '$',
       usdRate: 36.00,
@@ -59,7 +61,8 @@ const seedData = {
     branches: ['Principal', 'Sucursal Norte', 'Sucursal Sur']
   },
 
-  jornada: { openedOnce: false, active: false, openedAt: null }
+  jornada: { openedOnce: false, active: false, openedAt: null },
+  jornadaZ: []
 };
 
 const isDesktop = () => !!(typeof window !== 'undefined' && window.posdesktop);
