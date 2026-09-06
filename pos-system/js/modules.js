@@ -1606,10 +1606,7 @@ function posZHistoryDetail(id) {
   openModal({ title: 'Reporte Z — ' + (z.date || ''), body: `<div class="z-report-preview"><span style="white-space:pre">${esc}</span></div>`, footer });
   setTimeout(() => {
     $('#zvPrint').addEventListener('click', () => {
-      printHtml(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte Z ${z.date || ''}</title><style>
-        @page { size: 80mm auto; margin: 0; } html,body { margin:0; padding:0; }
-        body { font-family:'Courier New',monospace; font-size:11px; width:72mm; } .l { white-space:pre; }
-      </style></head><body>${esc.split('\n').map(l => `<div class="l">${l}</div>`).join('')}</body></html>`);
+      printHtml(thermalShell('Reporte Z ' + (z.date || ''), lns));
       toast('Imprimiendo Reporte Z', 'success');
     });
   }, 60);

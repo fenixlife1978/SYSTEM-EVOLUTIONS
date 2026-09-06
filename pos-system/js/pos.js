@@ -587,12 +587,7 @@ function getReceiptLines() {
 /* Construir HTML del ticket para impresión térmica 80mm */
 function buildReceiptHtml() {
   const { lines } = getReceiptLines();
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Ticket ${ticket.number}</title><style>
-    @page { size: 80mm auto; margin: 0; }
-    html,body { margin:0; padding:0; }
-    body { font-family:'Courier New','Lucida Console',monospace; font-size:11px; color:#000; width:72mm; }
-    .l { white-space:pre; }
-  </style></head><body>${lines.map(l => `<div class="l">${l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`).join('')}</body></html>`;
+  return thermalShell('Ticket ' + ticket.number, lines);
 }
 
 /* Imprimir ticket en impresora térmica 80mm */
@@ -606,6 +601,36 @@ function printHtml(html) {
 function printReceipt() {
   if (ticket.items.length === 0) { toast('El ticket está vacío', 'warn'); return; }
   printHtml(buildReceiptHtml());
+}
+
+/* ============================================================
+   Impresión térmica 80mm — configuración y plantilla compartida
+   Todas las salidas (ticket, factura, arqueo, Reporte Z) usan esta
+   misma envoltura para garantizar el mismo ancho de papel.
+   ============================================================ */
+const REC = { chars: 46 };              // caracteres por línea para papel de 80mm
+const recPadC = (t) => { t = String(t); if (t.length >= REC.chars) return t; const p = Math.floor((REC.chars - t.length) / 2); return ' '.repeat(p) + t + ' '.repeat(REC.chars - p - t.length); };
+const recPadLR = (l, v) => { l = String(l); v = String(v); const gap = Math.max(1, REC.chars - l.length - v.length); return l + ' '.repeat(gap) + v; };
+const recSep = () => '='.repeat(REC.chars);
+const escThermal = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/* Devuelve la separación base/IVA de un monto total (según config. de impuesto). */
+function splitTax(total) {
+  const rate = Number(db.settings.tax?.rate) || 0;
+  const included = db.settings.tax?.included !== false;
+  const base = included ? total / (1 + rate / 100) : total;
+  const iva = included ? total - base : total * (rate / 100);
+  return { base, iva, rate };
+}
+
+/* Envoltura HTML para impresora térmica de 80mm (recibe líneas de texto crudas). */
+function thermalShell(title, lines) {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${escThermal(title)}</title><style>
+    @page { size: 80mm auto; margin: 0; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: 'Lucida Console','Courier New',monospace; font-size: 11px; line-height: 1.35; color: #000; width: 72mm; }
+    .l { white-space: pre; }
+  </style></head><body>${lines.map(l => `<div class="l">${escThermal(l)}</div>`).join('')}</body></html>`;
 }
 
 function posCheckout() {
@@ -1153,8 +1178,7 @@ function posArqueo() {
       const su = usdM.reduce((a, m) => a + parseAmount($('#arqReal_' + m.k).value), 0) - usdM.reduce((a, m) => a + sys(m.k), 0);
       line.push('  Diferencia USD: ' + signDif(su) + ' ' + fmt.money(su), pad);
       line.push('Ventas del día: ' + fmt.money(ventasDia), 'Devoluciones: ' + fmt.money(devoluciones), pad);
-      const body = line.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      printHtml('<!doctype html><html><head><meta charset="utf-8"><title>Arqueo de Caja</title><style>@page{size:80mm auto;margin:0}html,body{margin:0;padding:0}body{font-family:"Courier New",monospace;font-size:11px;color:#000;width:72mm}.l{white-space:pre}</style></head><body>' + body.split('\n').map(l => '<div class="l">' + l + '</div>').join('') + '</body></html>');
+      printHtml(thermalShell('Arqueo de Caja', line));
       toast('Imprimiendo arqueo de caja', 'success');
     });
   }, 60);
@@ -1280,13 +1304,7 @@ function posReportZ() {
       posReportZ();
     });
     $('#zPrint').addEventListener('click', () => {
-      const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      printHtml(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte Z ${today}</title><style>
-        @page { size: 80mm auto; margin: 0; }
-        html,body { margin:0; padding:0; }
-        body { font-family:'Courier New','Lucida Console',monospace; font-size:11px; color:#000; width:72mm; }
-        .l { white-space:pre; }
-      </style></head><body>${esc.split('\n').map(l => `<div class="l">${l}</div>`).join('')}</body></html>`);
+      printHtml(thermalShell('Reporte Z ' + today, text.split('\n')));
       toast('Imprimiendo Reporte Z', 'success');
     });
   }, 60);
@@ -1348,33 +1366,68 @@ function posLastDetail(id) {
   }, 60);
 }
 
+/* Construye la impresión (80mm) de una factura/recibo de una venta YA guardada,
+   con detalle de items, impuesto, método de pago y totales. */
 function buildSaleReceiptHtml(s) {
-  const RW = 46;
-  const sep = '='.repeat(RW);
-  const padc = (t) => { t = String(t); if (t.length >= RW) return t; const p = Math.floor((RW - t.length) / 2); return ' '.repeat(p) + t + ' '.repeat(RW - p - t.length); };
-  const padlr = (l, v) => { l = String(l); v = String(v); const gap = Math.max(1, RW - l.length - v.length); return l + ' '.repeat(gap) + v; };
-  const cli = db.clients.find(c => c.name === s.client);
-  const st = s.status === 'credit' ? 'CREDITO' : s.status === 'refunded' ? 'REEMBOLSO' : 'PAGADA';
+  const c = db.settings.company;
+  const cli = db.clients.find(x => x.name === s.client);
+  const rate = Number(s.rate) || fmt.usdRate();
+  const total = Number(s.total) || 0;
+  const { base, iva, rate: rp } = splitTax(total);
+  const st = s.status === 'credit' ? 'CREDITO (CxC)'
+    : s.status === 'refunded' ? 'REEMBOLSADA/ANULADA'
+    : s.refundedPartial ? 'PAGADA / PARCIAL REEMB.' : 'PAGADA';
+  const docTit = s.status === 'credit' ? 'FACTURA A CREDITO' : 'FACTURA / RECIBO';
+
   const lns = [];
-  lns.push(padc('POSsystem Evolution'));
-  lns.push(sep);
-  lns.push(padlr('Recibo N°:', s.number));
-  lns.push(padlr('Fecha:', String(s.date).length > 10 ? (String(s.date).slice(0, 10) + ' ' + veHm12(String(s.date).slice(11))) : s.date));
-  lns.push('Cliente: ' + s.client);
-  if (cli && cli.taxId) lns.push('RIF/CI: ' + cli.taxId);
-  lns.push(sep);
-  lns.push(padlr('Artículos:', s.items));
-  lns.push(sep);
-  lns.push(padlr('TOTAL:', fmt.money(s.total)));
-  lns.push(padlr('Estado:', st));
-  lns.push(sep);
-  String(db.settings.pos.receiptFooter || '').split('\n').map(t => t.trim()).filter(Boolean).forEach(l => lns.push(padc(l)));
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Factura ${s.number}</title><style>
-    @page { size: 80mm auto; margin: 0; }
-    html,body { margin:0; padding:0; }
-    body { font-family:'Courier New','Lucida Console',monospace; font-size:11px; color:#000; width:72mm; }
-    .l { white-space:pre; }
-  </style></head><body>${lns.map(l => `<div class="l">${l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`).join('')}</body></html>`;
+  const push = (t) => lns.push(t);
+  push(recPadC(c.name));
+  if (c.rif) push(recPadC('RIF: ' + c.rif));
+  if (c.address) push(recPadC(c.address));
+  if (c.phone) push(recPadC('Tel: ' + c.phone));
+  if (c.email) push(recPadC(c.email));
+  if (c.website) push(recPadC(c.website));
+  push('');
+  push(recPadC(docTit));
+  push('');
+  push(recPadLR('N°:', s.number));
+  push(recPadLR('Fecha:', String(s.date).length > 10 ? (String(s.date).slice(0, 10) + ' ' + veHm12(String(s.date).slice(11))) : s.date));
+  push('Cliente: ' + s.client);
+  if (cli && cli.taxId) push('RIF/CI : ' + cli.taxId);
+  push(recSep());
+  (Array.isArray(s.lines) ? s.lines : []).forEach(l => {
+    const il = String(l.code || '') + '  ' + l.name;
+    push(il.length > REC.chars ? il.slice(0, REC.chars) : il);
+    const um = unitAbbr(l.present || l.base || 'Und', l.qty);
+    const det = '   ' + fmtNumStock(l.qty) + ' ' + um + ' x ' + fmt.num(l.price);
+    push(recPadLR(det, fmt.num((Number(l.qty) || 0) * (Number(l.price) || 0))));
+  });
+  push(recSep());
+  push(recPadLR('Base', fmt.money(base)));
+  push(recPadLR('IVA (' + rp + '%)', fmt.money(iva)));
+  push(recPadLR('TOTAL', fmt.money(total)));
+  push(recPadLR('Bs. (' + fmt.num(rate) + ')', fmt.esp(total * rate)));
+  push(recSep());
+  // Método(s) de pago
+  if (s.method === 'credit') {
+    push(recPadLR('Metodo:', 'Credito'));
+  } else if (Array.isArray(s.payments) && s.payments.length) {
+    push('PAGOS');
+    s.payments.forEach(p => {
+      const m = PAY_METHODS.find(x => x.k === p.method);
+      const lbl = m ? m.lbl : p.method;
+      if (p.cur === 'BS') push(recPadLR('  ' + lbl, 'Bs. ' + fmt.num(p.amount)));
+      else push(recPadLR('  ' + lbl, fmt.money(p.amount)));
+    });
+  } else {
+    push(recPadLR('Metodo:', METHOD_LBL(s.method)));
+  }
+  if (Number(s.changeUSD) > 0) push(recPadLR('Vuelto:', fmt.money(s.changeUSD)));
+  push(recSep());
+  push(recPadLR('Estado:', st));
+  String(db.settings.pos.receiptFooter || '').split('\n').map(t => t.trim()).filter(Boolean).forEach(l => push(recPadC(l)));
+  push(recPadC('POSsystem Evolution'));
+  return thermalShell('Factura ' + s.number, lns);
 }
 
 /* Apertura de Caja (obligatoria al ingresar con rol de cajero) */
