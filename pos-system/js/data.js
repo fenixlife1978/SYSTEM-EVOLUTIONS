@@ -65,6 +65,17 @@ const seedData = {
 
 const isDesktop = () => !!(typeof window !== 'undefined' && window.posdesktop);
 
+/* ---------- Demo helpers ---------- */
+const DEMO_MAX_PRODUCTS = 10;
+const DEMO_MAX_SALES    = 20;
+function isDemo() { return !!window.__DEMO__; }
+function demoProductLimit() { return isDemo() && db.products.length >= DEMO_MAX_PRODUCTS; }
+function demoSalesLimit()   { return isDemo() && db.sales.length >= DEMO_MAX_SALES; }
+function demoBlock(msg) {
+  toast(msg || 'Version Demo: limite alcanzado. Adquiera la version completa para seguir operando sin problemas.', 'error', 4500);
+  return false;
+}
+
 /* ---------- Persistencia ---------- */
 const DB = {
   load() {

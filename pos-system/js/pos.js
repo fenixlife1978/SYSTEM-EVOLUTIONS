@@ -635,6 +635,7 @@ function thermalShell(title, lines) {
 
 function posCheckout() {
   if (ticket.items.length === 0) { toast('El ticket está vacío', 'warn'); return; }
+  if (demoSalesLimit()) { demoBlock('Version Demo: ha alcanzado el limite de ' + DEMO_MAX_SALES + ' ventas. Contacte al distribuidor para adquirir la version completa y seguir operando sin problemas.'); return; }
   // Requerir cliente (ajuste POS): no dejar cobrar con el cliente genérico por defecto.
   if (posCfg().requireCustomer && isDefaultCustomer(ticket.customer)) {
     toast('Debe vincular un cliente real antes de cobrar (F3/F12).', 'warn', 3400);
@@ -1496,6 +1497,7 @@ function posSuspend() { posPending(); }
 
 /* F10 — Reembolso (búsqueda de venta previa) */
 function posRefund() {
+  if (isDemo()) { demoBlock('Version Demo: no se permiten reembolsos. Adquiera la version completa.'); return; }
   const eligible = db.sales.filter(s => s.status !== 'refunded' && !s.refundedPartial);
   if (!eligible.length) { toast('No hay ventas reembolsables', 'warn'); return; }
   const body = `

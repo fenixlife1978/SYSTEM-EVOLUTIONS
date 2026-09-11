@@ -274,6 +274,8 @@
 <!-- Iframe oculto para imprimir tickets (impresora térmica 80mm) -->
 <iframe id="printFrame" name="printFrame" style="display:none" title="Impresión de tickets"></iframe>
 
+<script>window.__DEMO__=false</script>
+<script>fetch('./demo.json').then(function(r){return r.json()}).then(function(d){window.__DEMO__=!!d.demo}).catch(function(){})</script>
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="js/data.js"></script>
 <script src="js/inventory.js"></script>

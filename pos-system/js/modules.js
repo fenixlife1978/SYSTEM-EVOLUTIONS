@@ -57,7 +57,7 @@ function renderPurchases() {
   $('#dashContent').innerHTML = html;
   paintPurchases();
   $('#purSearch').addEventListener('input', paintPurchases);
-  $('#newPurchase').addEventListener('click', purchaseForm);
+  $('#newPurchase').addEventListener('click', () => { if (isDemo()) { demoBlock('Version Demo: no se permiten nuevas compras. Adquiera la version completa.'); return; } purchaseForm(); });
 }
 
 function paintPurchases() {
@@ -455,7 +455,10 @@ function renderInventory() {
   paintInventory();
   $('#invSearch').addEventListener('input', paintInventory);
   $('#invCat').addEventListener('change', paintInventory);
-  $('#newProduct').addEventListener('click', () => productForm());
+  $('#newProduct').addEventListener('click', () => {
+    if (demoProductLimit()) { demoBlock('Version Demo: ha alcanzado el limite de ' + DEMO_MAX_PRODUCTS + ' productos. Adquiera la version completa para seguir creando productos.'); return; }
+    productForm();
+  });
   $('#invKardex').addEventListener('click', inventoryKardex);
   $('#exportInv').addEventListener('click', () => {
     const esc = (s) => String(s == null ? '' : s).replace(/"/g, '""');
@@ -780,6 +783,7 @@ function productForm(id, cloneSourceId) {
       const code = $('#pcCode').value.trim();
       const name = $('#pcName').value.trim();
       if (!name) { toast('Ingrese el nombre del producto', 'warn'); return; }
+      if (demoProductLimit()) { demoBlock('Version Demo: ha alcanzado el limite de ' + DEMO_MAX_PRODUCTS + ' productos. Adquiera la version completa para seguir creando productos.'); return; }
       const cnt = contenido();
       const unidadBase = pcBaseUnit.value || pcCanon.value || 'Unidad';
       const canonU = pcCanon.value || 'Unidad';
@@ -1267,6 +1271,7 @@ function clientForm(id) {
         balance: parseFloat($('#clBal').value) || 0,
         status: c.status || 'active'
       };
+      if (!id && isDemo()) { demoBlock('Version Demo: no se permiten nuevas altas de clientes. Adquiera la version completa.'); return; }
       if (id) Object.assign(c, data);
       else db.clients.push({ id: Date.now(), createdAt: veDate(), ...data });
       DB.save(db); closeModal(); renderClients();
@@ -1367,6 +1372,7 @@ function supplierForm(id) {
         balance: parseFloat($('#spBal').value) || 0, address: $('#spAddr').value,
         status: s.status || 'active'
       };
+      if (!id && isDemo()) { demoBlock('Version Demo: no se permiten nuevas altas de proveedores. Adquiera la version completa.'); return; }
       if (id) Object.assign(s, data);
       else db.suppliers.push({ id: Date.now(), ...data });
       DB.save(db); closeModal(); renderSuppliers();
@@ -1423,7 +1429,7 @@ function renderAccounting() {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', paintAccounting);
   });
-  $('#newMove').addEventListener('click', accountingForm);
+  $('#newMove').addEventListener('click', () => { if (isDemo()) { demoBlock('Version Demo: no se permiten nuevos movimientos contables. Adquiera la version completa.'); return; } accountingForm(); });
 }
 
 function paintAccounting() {

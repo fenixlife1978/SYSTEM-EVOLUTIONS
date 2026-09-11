@@ -25,15 +25,37 @@ jobs:
       - name: Compilar dependencias nativas para Electron
         run: npx electron-builder install-app-deps
 
-      - name: Generar instalador .exe (NSIS + portable)
-        run: npx electron-builder --win --x64 --publish never
+      # ─── INSTALADOR COMPLETO (NSIS) ───
+      - name: Generar demo.json (versión completa)
+        run: node -e "require('fs').writeFileSync('pos-system/demo.json','{\"demo\":false}')"
+
+      - name: Generar instalador completo (.exe NSIS)
+        run: npx electron-builder --win nsis --x64 --publish never
         env:
-          # El build no firma; deshabilitamos publicación automática
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: Subir instalador como artefacto
+      - name: Subir instalador completo
         uses: actions/upload-artifact@v4
         with:
-          name: POSsystem-Evolution-setup
+          name: POSsystem-Evolution-Installer
           path: dist/*.exe
+          if-no-files-found: error
+
+      # ─── VERSIÓN DEMO (PORTABLE) ───
+      - name: Limpiar dist para segundo build
+        run: Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+
+      - name: Generar demo.json (versión demo)
+        run: node -e "require('fs').writeFileSync('pos-system/demo.json','{\"demo\":true}')"
+
+      - name: Generar Demo portable (.exe)
+        run: npx electron-builder --win portable --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Subir Demo portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: POSsystem-Evolution-Demo
+          path: dist/*demo*.exe
           if-no-files-found: error

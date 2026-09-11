@@ -33,14 +33,36 @@ function bindLogin() {
     const u = $('#loginUser').value.trim();
     const p = $('#loginPass').value.trim();
     const user = db.users.find(x => x.username === u);
-    const passOk = (p === 'admin' || p === '1234');
-    if (!user || !passOk) {
+    // Credenciales demo: admin/admin123 o cajero/cajero123
+    const isDemoLogin = isDemo() && (
+      (u === 'admin'  && p === 'admin123') ||
+      (u === 'cajero' && p === 'cajero123')
+    );
+    const passOk = isDemoLogin || (p === 'admin' || p === '1234');
+    if (!user && !isDemoLogin) {
       toast('Usuario o contraseña inválidos', 'error');
       return;
     }
-    session.user = user;
-    session.role = user.role;
-    user.lastLogin = veStamp();
+    if (!passOk) {
+      toast('Usuario o contraseña inválidos', 'error');
+      return;
+    }
+    // Si es login demo con credenciales demo, crear usuario temporal si no existe
+    if (isDemoLogin && !user) {
+      const demoUser = {
+        id: Date.now(), username: u, name: u === 'admin' ? 'Administrador Demo' : 'Cajero Demo',
+        role: u === 'admin' ? 'admin' : 'cashier', email: u + '@demo.com',
+        branch: 'Principal', status: 'active', lastLogin: ''
+      };
+      db.users.push(demoUser);
+      DB.save(db);
+      session.user = demoUser;
+      session.role = demoUser.role;
+    } else {
+      session.user = user || db.users[0];
+      session.role = session.user.role;
+    }
+    session.user.lastLogin = veStamp();
     DB.save(db);
     showApp();
   });
@@ -54,6 +76,17 @@ function showApp() {
   $('#userAvatar').textContent = session.user.name.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
   $('#posCashierName').textContent = session.user.name;
   $('#statusCashier').textContent = session.user.name;
+  // Banner de demostración
+  if (isDemo()) {
+    const existing = document.getElementById('demoBanner');
+    if (!existing) {
+      const banner = document.createElement('div');
+      banner.id = 'demoBanner';
+      banner.style.cssText = 'background:linear-gradient(90deg,#f59e0b,#d97706);color:#000;text-align:center;padding:6px 12px;font-size:12px;font-weight:700;letter-spacing:.5px;position:fixed;top:0;left:0;right:0;z-index:9999';
+      banner.innerHTML = 'VERSION DEMO — Productos: ' + db.products.length + '/' + DEMO_MAX_PRODUCTS + ' · Ventas: ' + db.sales.length + '/' + DEMO_MAX_SALES + ' · Adquiera la version completa';
+      document.body.appendChild(banner);
+    }
+  }
   // Los cajeros no acceden a la administración
   const isAdmin = session.role !== 'cashier';
   $('#openDashboardBtn').style.display = isAdmin ? '' : 'none';

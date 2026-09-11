@@ -77,11 +77,23 @@ Todos los datos se guardan automáticamente en `localStorage` del navegador.
 
 ## 🔐 Usuarios de prueba
 
+### Versión Completa
 | Usuario  | Contraseña | Rol         |
 |----------|------------|-------------|
 | admin    | admin      | admin       |
 | cajero1  | admin      | cashier     |
 | supervisor | admin    | supervisor  |
+
+### Versión Demo
+| Usuario  | Contraseña  | Rol      |
+|----------|-------------|----------|
+| admin    | admin123    | admin    |
+| cajero   | cajero123   | cashier  |
+
+**Límites de la versión Demo:**
+- **10 productos** máximo (se bloquea la creación al alcanzar el límite)
+- **20 ventas** máximo (se bloquea el checkout al alcanzar el límite)
+- Las acciones de admin (clientes, proveedores, compras, contabilidad, reembolsos) también se bloquean
 
 ## ✨ Características
 
@@ -93,13 +105,15 @@ Todos los datos se guardan automáticamente en `localStorage` del navegador.
 - ✅ Todos los movimientos actualizan contabilidad
 - ✅ Stock se descuenta automáticamente al vender
 - ✅ Stock aumenta al registrar compras
-- ✅ Reportes con exportación a CSV
+- ✅ Reportes con exportación a CSV y PDF profesional (jsPDF)
 - ✅ Búsqueda en todos los módulos
 - ✅ Filtros por estado, fecha, categoría
 - ✅ Responsive design
 - ✅ Toasts de notificación
 - ✅ Modales genéricos para formularios
 - ✅ Atajos de teclado (F2, F4, F8, F12, Esc)
+- ✅ Versión Demo con límites de productos y ventas
+- ✅ Generación de instalador .exe via GitHub Actions (NSIS + Portable)
 
 ## 🧪 Datos de demo
 
@@ -113,3 +127,21 @@ Todos los datos se guardan automáticamente en `localStorage` del navegador.
 - 9 movimientos contables
 - 5 usuarios
 - 3 movimientos de caja
+
+## 📦 Generación de instaladores
+
+Los instaladores se generan automáticamente via **GitHub Actions** en cada push a `main`:
+
+| Artefacto | Formato | Descripción |
+|-----------|---------|-------------|
+| `POSsystem-Evolution-Installer` | NSIS .exe | Instalador completo de Windows |
+| `POSsystem-Evolution-Demo` | Portable .exe | Versión Demo sin instalar (portable) |
+
+### Build local
+```bash
+# Instalador completo
+npm run build:full
+
+# Versión Demo portable
+npm run build:demo
+```

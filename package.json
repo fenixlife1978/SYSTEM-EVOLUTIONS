@@ -13,7 +13,9 @@
     "rebuild": "electron-builder install-app-deps",
     "postinstall": "electron-builder install-app-deps",
     "dist": "electron-builder --win",
-    "dist:dir": "electron-builder --win --dir"
+    "dist:dir": "electron-builder --win --dir",
+    "build:full": "node -e \"require('fs').writeFileSync('pos-system/demo.json','{\\\"demo\\\":false}')\" && electron-builder --win nsis --x64 --publish never",
+    "build:demo": "node -e \"require('fs').writeFileSync('pos-system/demo.json','{\\\"demo\\\":true}')\" && electron-builder --win portable --x64 --publish never"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0"
