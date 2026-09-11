@@ -27,7 +27,7 @@ jobs:
 
       # ─── INSTALADOR COMPLETO (NSIS) ───
       - name: Generar demo.json (versión completa)
-        run: node -e "require('fs').writeFileSync('pos-system/demo.json','{\"demo\":false}')"
+        run: node write-demo.js false
 
       - name: Generar instalador completo (.exe NSIS)
         run: npx electron-builder --win nsis --x64 --publish never
@@ -46,7 +46,7 @@ jobs:
         run: Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
 
       - name: Generar demo.json (versión demo)
-        run: node -e "require('fs').writeFileSync('pos-system/demo.json','{\"demo\":true}')"
+        run: node write-demo.js true
 
       - name: Generar Demo portable (.exe)
         run: npx electron-builder --win portable --x64 --publish never
