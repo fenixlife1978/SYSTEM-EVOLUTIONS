@@ -49,7 +49,7 @@ jobs:
         run: node write-demo.js true
 
       - name: Generar Demo instalable (.exe NSIS)
-        run: npx electron-builder --win nsis --x64 --publish never -c.nsis.artifactName=${productName}-${version}-demo-setup.${ext}
+        run: npx electron-builder --win nsis --x64 --publish never -c.nsis.artifactName=POSsystem-Evolution-demo-setup.exe
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
