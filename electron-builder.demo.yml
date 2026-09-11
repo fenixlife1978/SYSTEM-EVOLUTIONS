@@ -1,0 +1,26 @@
+appId: ve.com.possystem.evolution
+productName: POSsystem Evolution
+icon: icon.png
+directories:
+  output: dist
+  buildResources: build
+files:
+  - main.js
+  - preload.js
+  - db.js
+  - pos-system/**/*
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**
+win:
+  icon: icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  artifactName: 'POSsystem-Evolution-${version}-demo-setup.${ext}'
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
