@@ -48,14 +48,14 @@ jobs:
       - name: Generar demo.json (versión demo)
         run: node write-demo.js true
 
-      - name: Generar Demo portable (.exe)
-        run: npx electron-builder --win portable --x64 --publish never
+      - name: Generar Demo instalable (.exe NSIS)
+        run: npx electron-builder --win nsis --x64 --publish never -c.nsis.artifactName=${productName}-${version}-demo-setup.${ext}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: Subir Demo portable
+      - name: Subir Demo instalable
         uses: actions/upload-artifact@v4
         with:
-          name: POSsystem-Evolution-Demo
+          name: POSsystem-Evolution-Demo-Installer
           path: dist/*demo*.exe
           if-no-files-found: error
