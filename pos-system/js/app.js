@@ -9,6 +9,9 @@ const $$ = (s, ctx = document) => Array.from(ctx.querySelectorAll(s));
 async function boot() {
   // En escritorio (Electron) se carga el estado persistido en SQLite antes de pintar nada
   await hydrateFromSource();
+  // Obtener tasa BCV oficial automáticamente
+  await fetchBcvRate();
+  setInterval(fetchBcvRate, BCV_CACHE_MS);
   bindLogin();
   bindGlobal();
   hydrateIcons();

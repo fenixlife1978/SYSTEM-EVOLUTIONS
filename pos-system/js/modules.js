@@ -219,24 +219,18 @@ function purchaseForm() {
     <div style="font-size:11px;color:#6b7280;margin-top:4px" id="pfHint"></div>
 
     <div class="card-title" style="margin-top:14px">Condiciones de pago</div>
-    <div class="form-grid" style="margin-top:6px">
-      <div class="field"><label>Tasa BCV aplicada (Bs/USD)</label><input id="pfRate" inputmode="decimal" value="${fmt.num(sysRate)}" title="Tasa usada para convertir Bs. ↔ USD" /></div>
-      <div class="field" id="pfDaysWrap"><label>Días de crédito</label><input id="pfDays" type="number" min="1" value="30" /></div>
-    </div>
-    <div id="pfMixto" style="display:none;border:1px solid #e0e7ef;background:#f8fafc;border-radius:8px;padding:10px;margin-top:4px">
-      <b style="font-size:12px;color:#374151">Pago de contado (se descuenta del total)</b>
-      <div class="form-grid" style="margin-top:6px">
-        <div class="field"><label>Pago en Bs.</label><input id="pfPayBs" inputmode="decimal" value="0" /></div>
-        <div class="field"><label>Pago en USD</label><input id="pfPayUsd" inputmode="decimal" value="0" /></div>
+    <div id="pfPaySummary" style="margin-top:6px;padding:10px 12px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span id="pfPayLabel" style="font-weight:600">Crédito · 30 días · Tasa ${fmt.num(sysRate)} Bs/USD</span>
+        <button class="btn sm" id="pfPayConfig">${ico('cashbox')} Configurar pago</button>
       </div>
-      <div style="font-size:11px;color:#6b7280;margin-top:4px">Al escribir un monto en Bs. se calcula su equivalente en USD con la tasa aplicada, y viceversa. El resto del total se registra como crédito (CxP).</div>
+      <div id="pfPayDetail" style="font-size:12px;color:#6b7280;margin-top:4px"></div>
     </div>
-    <div id="pfSum" style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="pfSave">Registrar compra</button>`;
   openModal({ title: 'Nueva compra', body: html, footer, size: 'modal-lg' });
-  const state = { items: [], rate: sysRate };
+  const state = { items: [], rate: sysRate, days: 30, cashBs: 0, cashUsd: 0 };
   const num = (s) => parseFloat(String(s == null ? '' : s).replace(',', '.')) || 0;
   const curProd = () => db.products.find(x => x.id === +$('#pfProd').value);
   const optsOf = () => buyOpts(curProd());
@@ -270,32 +264,114 @@ function purchaseForm() {
   const fmtNum = (v) => (Number(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
   const itemTotal = () => state.items.reduce((s, i) => s + (i.baseQty * i.costBase), 0);
   const mode = () => $('#pfPay').value;
-  const curRate = () => { state.rate = fmt.parseEsp($('#pfRate').value); if (!(state.rate > 0)) state.rate = sysRate; return state.rate; };
+  const curRate = () => state.rate;
   const dec2 = (v) => String(Math.round((Number(v) || 0) * 100) / 100);
 
-  // Recalcula todos los montos según forma de pago y pinta el resumen siempre visible.
-  const recalc = () => {
+  // Abre el modal dedicado para configurar crédito / mixto
+  const openPaymentModal = () => {
     const total = itemTotal();
     const m = mode();
-    curRate();
-    $('#pfMixto').style.display = m === 'mixto' ? 'block' : 'none';
-    $('#pfDaysWrap').style.display = (m === 'credit' || m === 'mixto') ? '' : 'none';
-    let cashBs = 0, cashUsd = 0;
-    if (m === 'mixto') { cashBs = fmt.parseEsp($('#pfPayBs').value); cashUsd = fmt.parseEsp($('#pfPayUsd').value); }
-    let cashUSD = 0, credit = total;
-    if (m === 'contado') cashUSD = total;
-    else if (m === 'credit') cashUSD = 0;
-    else cashUSD = cashUsd + (state.rate > 0 ? cashBs / state.rate : 0);
-    cashUSD = Math.min(cashUSD, total);
-    credit = Math.max(0, total - cashUSD);
-    state.cashUSD = cashUSD; state.creditUSD = credit;
-    const bf = (t) => { const w = t * state.rate; return 'Bs. ' + fmt.esp(w); };
-    $('#pfSum').innerHTML = `
-      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total Factura (Bs.)</span><b>${bf(total)}</b></div>
-      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total Factura (USD)</span><b>${fmt.money(total)}</b></div>
-      <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Pago de contado (USD)</span><b>${fmt.money(cashUSD)} <small style="color:#6b7280">(${bf(cashUSD)})</small></b></div>
-      <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding:4px 0 0;border-top:1px dashed #bbf7d0;color:#15803d"><span>Saldo pendiente (crédito)</span><b>${fmt.money(credit)} <small style="color:#15803d">(${bf(credit)})</small></b></div>`;
+    const isCredOrMix = m === 'credit' || m === 'mixto';
+    if (!isCredOrMix) { recalcPaySummary(); return; }
+    const title = m === 'mixto' ? 'Configurar pago mixto' : 'Configurar crédito';
+    const showMixto = m === 'mixto';
+    const html = `
+      <div class="form-grid">
+        <div class="field"><label>Tasa BCV (Bs/USD)</label>
+          <input id="pmRate" type="number" step="0.01" min="0" value="${fmt.num(state.rate)}" title="Editable — usa la tasa BCV oficial por defecto" />
+          <div style="font-size:11px;color:#6b7280;margin-top:2px">Fuente: BCV oficial · Actualización automática cada 10 min</div>
+        </div>
+        <div class="field"><label>Días de crédito</label>
+          <input id="pmDays" type="number" min="1" value="${state.days}" />
+        </div>
+      </div>
+      ${showMixto ? `
+        <div style="margin-top:10px;padding:10px;border:1px solid #e0e7ef;background:#f8fafc;border-radius:8px">
+          <b style="font-size:12px;color:#374151">Pago de contado (se descuenta del total)</b>
+          <div class="form-grid" style="margin-top:6px">
+            <div class="field"><label>Monto en Bs.</label><input id="pmPayBs" inputmode="decimal" value="${fmt.num(state.cashBs)}" /></div>
+            <div class="field"><label>Monto en USD</label><input id="pmPayUsd" inputmode="decimal" value="${fmt.num(state.cashUsd)}" /></div>
+          </div>
+          <div style="font-size:11px;color:#6b7280;margin-top:4px">Escriba en uno y se calcula automáticamente el otro según la tasa BCV.</div>
+        </div>
+      ` : ''}
+      <div id="pmSum" style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px"></div>
+    `;
+    const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
+                    <button class="btn primary" id="pmSave">Aceptar</button>`;
+    openModal({ title, body: html, footer });
+
+    const pmRecalc = () => {
+      const r = fmt.parseEsp($('#pmRate').value);
+      if (r > 0) state.rate = r;
+      state.days = Math.max(1, Math.round(fmt.parseEsp($('#pmDays').value) || 30));
+      let cashBs = 0, cashUsd = 0, cashUSD = 0, credit = total;
+      if (showMixto) {
+        cashBs = fmt.parseEsp($('#pmPayBs').value);
+        cashUsd = fmt.parseEsp($('#pmPayUsd').value);
+        cashUSD = cashUsd + (state.rate > 0 ? cashBs / state.rate : 0);
+        cashUSD = Math.min(cashUSD, total);
+      }
+      credit = Math.max(0, total - cashUSD);
+      state.cashBs = cashBs; state.cashUsd = cashUsd;
+      state.cashUSD = cashUSD; state.creditUSD = credit;
+      const bf = (t) => 'Bs. ' + fmt.esp(t * state.rate);
+      $('#pmSum').innerHTML = `
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total factura</span><b>${fmt.money(total)} (${bf(total)})</b></div>
+        ${showMixto ? `
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Pago contado</span><b>${fmt.money(cashUSD)} (${bf(cashUSD)})</b></div>
+        ` : ''}
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding:4px 0 0;border-top:1px dashed #bbf7d0;color:${credit > 0.004 ? '#15803d' : '#6b7280'}">
+          <span>${credit > 0.004 ? 'Saldo crédito (CxP)' : 'Total cubierto'}</span>
+          <b>${fmt.money(credit)} (${bf(credit)})</b>
+        </div>`;
+    };
+    $('#pmRate').addEventListener('input', pmRecalc);
+    $('#pmDays').addEventListener('input', pmRecalc);
+    if (showMixto) {
+      $('#pmPayBs').addEventListener('input', () => { const r = fmt.parseEsp($('#pmRate').value); if (r > 0) $('#pmPayUsd').value = dec2(fmt.parseEsp($('#pmPayBs').value) / r); pmRecalc(); });
+      $('#pmPayUsd').addEventListener('input', () => { const r = fmt.parseEsp($('#pmRate').value); $('#pmPayBs').value = dec2(fmt.parseEsp($('#pmPayUsd').value) * r); pmRecalc(); });
+    }
+    pmRecalc();
+    $('#pmSave').addEventListener('click', () => {
+      state.rate = fmt.parseEsp($('#pmRate').value); if (!(state.rate > 0)) state.rate = sysRate;
+      state.days = Math.max(1, Math.round(fmt.parseEsp($('#pmDays').value) || 30));
+      if (showMixto) {
+        state.cashBs = fmt.parseEsp($('#pmPayBs').value);
+        state.cashUsd = fmt.parseEsp($('#pmPayUsd').value);
+        state.cashUSD = state.cashUsd + (state.rate > 0 ? state.cashBs / state.rate : 0);
+        state.cashUSD = Math.min(state.cashUSD, total);
+      } else {
+        state.cashBs = 0; state.cashUsd = 0; state.cashUSD = 0;
+      }
+      state.creditUSD = Math.max(0, total - state.cashUSD);
+      closeModal();
+      recalcPaySummary();
+    });
   };
+
+  const recalcPaySummary = () => {
+    const total = itemTotal();
+    const m = mode();
+    const r = state.rate;
+    const lbl = $('#pfPayLabel');
+    const det = $('#pfPayDetail');
+    if (m === 'contado') {
+      lbl.textContent = 'Contado — Pago total';
+      det.innerHTML = `Total: <b>${fmt.money(total)}</b> (${fmt.bs(total)}) · Tasa: ${fmt.num(r)} Bs/USD`;
+    } else if (m === 'credit') {
+      lbl.textContent = `Crédito · ${state.days} días · Tasa ${fmt.num(r)} Bs/USD`;
+      det.innerHTML = `Saldo por pagar (CxP): <b>${fmt.money(total)}</b> (${fmt.bs(total)})`;
+    } else {
+      const cb = state.cashBs > 0 ? `Bs. ${fmt.esp(state.cashBs)}` : '';
+      const cu = state.cashUsd > 0 ? `${fmt.money(state.cashUsd)}` : [];
+      const pago = [cb, cu].filter(Boolean).join(' + ') || '$0.00';
+      lbl.textContent = `Mixto · ${state.days} días · Tasa ${fmt.num(r)} Bs/USD`;
+      det.innerHTML = `Contado: <b>${pago}</b> → ${fmt.money(state.cashUSD)} · Crédito (CxP): <b>${fmt.money(state.creditUSD)}</b> (${fmt.bs(state.creditUSD)})`;
+    }
+  };
+
+  const recalc = () => { recalcPaySummary(); };
   const repaint = () => {
     const tb = $('#pfBody');
     if (state.items.length === 0) tb.innerHTML = `<tr><td colspan="8" class="empty">Sin productos</td></tr>`;
@@ -317,11 +393,8 @@ function purchaseForm() {
   $('#pfCost').addEventListener('input', hint);
   $('#pfProd').addEventListener('change', fillUnit);
   $('#pfUnit').addEventListener('change', hint);
-  $('#pfRate').addEventListener('input', recalc);
-  $('#pfPay').addEventListener('change', recalc);
-  // Conversión automática Bs. ↔ USD según la tasa aplicada (al recargar ambos campos).
-  $('#pfPayBs').addEventListener('input', () => { curRate(); if (state.rate > 0) $('#pfPayUsd').value = dec2(fmt.parseEsp($('#pfPayBs').value) / state.rate); recalc(); });
-  $('#pfPayUsd').addEventListener('input', () => { curRate(); $('#pfPayBs').value = dec2(fmt.parseEsp($('#pfPayUsd').value) * state.rate); recalc(); });
+  $('#pfPay').addEventListener('change', () => { recalcPaySummary(); });
+  $('#pfPayConfig').addEventListener('click', openPaymentModal);
   fillUnit(); repaint();
   $('#pfAdd').addEventListener('click', () => {
     const p = curProd();
@@ -345,19 +418,17 @@ function purchaseForm() {
     if (state.items.length === 0) { toast('Agregue al menos un producto', 'warn'); return; }
     const sup = db.suppliers.find(s => s.id === +$('#pfSupplier').value);
     if (!sup) { toast('Seleccione el proveedor', 'warn'); return; }
-    const m = mode(); curRate();
-    const days = Math.max(1, Math.round(fmt.parseEsp($('#pfDays').value) || 30));
-    let cashBs = 0, cashUsd = 0;
-    if (m === 'mixto') { cashBs = fmt.parseEsp($('#pfPayBs').value); cashUsd = fmt.parseEsp($('#pfPayUsd').value); }
+    const m = mode();
     const total = itemTotal();
-    let cashUSD = m === 'contado' ? total : (m === 'credit' ? 0 : cashUsd + (state.rate > 0 ? cashBs / state.rate : 0));
+    // Recalcular desde state (configurado vía modal)
+    let cashUSD = m === 'contado' ? total : (m === 'credit' ? 0 : state.cashUSD);
     cashUSD = Math.min(cashUSD, total);
     let credit = Math.max(0, total - cashUSD);
     if (m === 'mixto') {
       if (cashUSD <= 0) { toast('En pago Mixto indique un pago de contado (Bs. o USD)', 'warn'); return; }
       if (total - cashUSD <= 0.004) { toast('El pago de contado cubre el total; seleccione Contado', 'warn'); return; }
     }
-    if ((m === 'credit' || m === 'mixto') && !($('#pfDays').value > 0)) { toast('Indique los días de crédito', 'warn'); return; }
+    if ((m === 'credit' || m === 'mixto') && !(state.days > 0)) { toast('Indique los días de crédito', 'warn'); return; }
     // Sumar stock por producto (en unidad base)
     const acc = {};
     state.items.forEach(i => { acc[i.pid] = (acc[i.pid] || 0) + i.baseQty; });
@@ -370,8 +441,8 @@ function purchaseForm() {
       items: state.items.length,
       total,
       payment: m,
-      rate: state.rate, days: m === 'credit' || m === 'mixto' ? days : 0,
-      paidBs: m === 'mixto' ? cashBs : 0,
+      rate: state.rate, days: m === 'credit' || m === 'mixto' ? state.days : 0,
+      paidBs: m === 'mixto' ? state.cashBs : 0,
       paidUsd: cashUSD,
       creditUSD: credit,
       detail: state.items.map(i => ({ code: i.code, name: i.name, entry: i.entry, base: invBaseUnit(db.products.find(pr => pr.id === i.pid) || i), qty: i.qty, baseQty: i.baseQty, cost: i.costBase }))

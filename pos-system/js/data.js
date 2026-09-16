@@ -267,6 +267,32 @@ const fmt = {
   }
 };
 
+/* ---------- Tasa BCV automática desde API oficial ---------- */
+let _bcvLastFetch = 0;
+const BCV_API_URL = 'https://bcv.today/api/rate.json';
+const BCV_CACHE_MS = 10 * 60 * 1000; // 10 minutos
+
+async function fetchBcvRate() {
+  const now = Date.now();
+  if (now - _bcvLastFetch < BCV_CACHE_MS) return; // ya reciente
+  try {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 5000);
+    const resp = await fetch(BCV_API_URL, { signal: ctrl.signal });
+    clearTimeout(tid);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const rate = Number(data?.rate || data?.USD || data?.ventana);
+    if (rate > 0) {
+      db.settings.pos.usdRate = Math.round(rate * 100) / 100;
+      _bcvLastFetch = now;
+      console.info('[BCV] Tasa actualizada:', db.settings.pos.usdRate);
+    }
+  } catch (e) {
+    console.warn('[BCV] No se pudo obtener tasa oficial:', e.message || e);
+  }
+}
+
 /* ---------- Fecha / hora local de Venezuela (UTC-4, sin horario de verano) ---------- */
 const VE_OFFSET_H = -4;
 function veParts(t) {
