@@ -18,7 +18,8 @@
     "build:demo": "node write-demo.js true && electron-builder --config electron-builder.demo.yml --x64 --publish never"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0"
+    "better-sqlite3": "^11.10.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "electron": "^33.3.1",
@@ -36,6 +37,7 @@
       "main.js",
       "preload.js",
       "db.js",
+      "network.js",
       "pos-system/**/*"
     ],
     "asar": true,

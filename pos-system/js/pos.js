@@ -824,8 +824,7 @@ function finalizeSale(total, base, tax, payData) {
     amount: total,
     ref: 'V-' + ticket.number
   });
-  // Siguiente número
-  db.settings.invoice.nextNumber += 1;
+  // Siguiente número (ya incrementado por generateInvoiceNumber en resetTicket)
   DB.save(db);
   // Capturar el ticket ANTES de resetear para imprimir la copia correcta
   const receiptHtml = buildReceiptHtml();
@@ -1439,7 +1438,7 @@ function buildSaleReceiptHtml(s) {
 function openCashOpening() {
   if (!db.jornada) db.jornada = { openedOnce: false, active: false };
   const tasa = fmt.usdRate();
-  const recibo = String(db.settings.invoice.nextNumber).padStart(9, '0');
+  const recibo = peekInvoiceNumber();
   const html = `
     <div class="form-grid">
       <div class="field span-2"><label>Fondo de Apertura Inicial en Efectivo Bs</label>
@@ -1478,7 +1477,7 @@ function openCashOpening() {
         amount: parseFloat(fondoUsd) || 0,
         ref: 'AP-' + Date.now().toString().slice(-5)
       });
-      // Primera apertura: iniciar numeración correlativa de recibos en 000000001
+      // Primera apertura de esta caja: iniciar numeración correlativa en 1
       if (!db.jornada.openedOnce) {
         db.settings.invoice.nextNumber = 1;
         db.jornada.openedOnce = true;
