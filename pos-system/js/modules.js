@@ -393,7 +393,15 @@ function purchaseForm() {
   $('#pfCost').addEventListener('input', hint);
   $('#pfProd').addEventListener('change', fillUnit);
   $('#pfUnit').addEventListener('change', hint);
-  $('#pfPay').addEventListener('change', () => { recalcPaySummary(); });
+  $('#pfPay').addEventListener('change', () => {
+    const m = mode();
+    if (m === 'credit' || m === 'mixto') {
+      openPaymentModal();
+    } else {
+      state.cashBs = 0; state.cashUsd = 0; state.cashUSD = 0; state.creditUSD = 0;
+      recalcPaySummary();
+    }
+  });
   $('#pfPayConfig').addEventListener('click', openPaymentModal);
   fillUnit(); repaint();
   $('#pfAdd').addEventListener('click', () => {
