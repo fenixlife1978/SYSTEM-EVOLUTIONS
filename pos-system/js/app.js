@@ -12,6 +12,11 @@ async function boot() {
   // Obtener tasa BCV oficial automáticamente
   await fetchBcvRate();
   setInterval(fetchBcvRate, BCV_CACHE_MS);
+  // Actualizar UI del POS cuando la tasa BCV cambie
+  setOnBcvRateUpdate((newRate) => {
+    if (typeof updateTotals === 'function') updateTotals();
+    toast('Tasa BCV actualizada: ' + fmt.num(newRate) + ' Bs/USD', 'info', 3000);
+  });
   bindLogin();
   bindGlobal();
   hydrateIcons();

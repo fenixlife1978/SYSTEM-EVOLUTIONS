@@ -269,12 +269,15 @@ const fmt = {
 
 /* ---------- Tasa BCV automática desde API oficial ---------- */
 let _bcvLastFetch = 0;
-const BCV_API_URL = 'https://bcv.today/api/rate.json';
+const BCV_API_URL = 'https://bcv.today/api/v1/rate.json';
 const BCV_CACHE_MS = 10 * 60 * 1000; // 10 minutos
+let _onBcvRateUpdate = null;
+
+function setOnBcvRateUpdate(fn) { _onBcvRateUpdate = fn; }
 
 async function fetchBcvRate() {
   const now = Date.now();
-  if (now - _bcvLastFetch < BCV_CACHE_MS) return; // ya reciente
+  if (now - _bcvLastFetch < BCV_CACHE_MS) return;
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 5000);
@@ -282,11 +285,16 @@ async function fetchBcvRate() {
     clearTimeout(tid);
     if (!resp.ok) return;
     const data = await resp.json();
-    const rate = Number(data?.rate || data?.USD || data?.ventana);
+    const rate = Number(data?.USD);
     if (rate > 0) {
-      db.settings.pos.usdRate = Math.round(rate * 100) / 100;
-      _bcvLastFetch = now;
-      console.info('[BCV] Tasa actualizada:', db.settings.pos.usdRate);
+      const rounded = Math.round(rate * 100) / 100;
+      if (db.settings.pos.usdRate !== rounded) {
+        db.settings.pos.usdRate = rounded;
+        _bcvLastFetch = now;
+        console.info('[BCV] Tasa actualizada:', rounded, '(' + (data.effective_date || '') + ')');
+        if (typeof DB !== 'undefined' && DB.save) DB.save(db);
+        if (typeof _onBcvRateUpdate === 'function') _onBcvRateUpdate(rounded);
+      }
     }
   } catch (e) {
     console.warn('[BCV] No se pudo obtener tasa oficial:', e.message || e);
