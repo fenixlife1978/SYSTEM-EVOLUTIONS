@@ -15,25 +15,31 @@ async function boot() {
   updateClock();
   setInterval(updateClock, 1000);
   updateDate();
-  // Indicador de plataforma (solo console para no alterar la UI)
+  // Inicializar red multi-caja
+  await initNetwork();
+  updateNetworkStatusUI();
+  // Indicador de plataforma
   if (window.posdesktop) {
     console.info('[posdesktop]', window.posdesktop.versions);
+    console.info('[Caja] ID:', getCajaId(), '· Nombre:', getCajaNombre());
   }
 }
 
 function bindLogin() {
-  // Selector de rol Administrador / Cajero
-  $$('.rtab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      $$('.rtab').forEach(t => t.classList.toggle('active', t === tab));
+  // Mostrar/ocultar campo IP según selección de caja
+  const cajaSelect = $('#loginCaja');
+  const ipBox = $('#clientIPBox');
+  if (cajaSelect && ipBox) {
+    cajaSelect.addEventListener('change', () => {
+      ipBox.style.display = cajaSelect.value === 'client' ? '' : 'none';
     });
-  });
-  $('#loginForm').addEventListener('submit', (e) => {
+  }
+
+  $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const u = $('#loginUser').value.trim();
     const p = $('#loginPass').value.trim();
     const user = db.users.find(x => x.username === u);
-    // Credenciales demo: admin/admin123 o cajero/cajero123
     const isDemoLogin = isDemo() && (
       (u === 'admin'  && p === 'admin123') ||
       (u === 'cajero' && p === 'cajero123')
@@ -47,7 +53,19 @@ function bindLogin() {
       toast('Usuario o contraseña inválidos', 'error');
       return;
     }
-    // Si es login demo con credenciales demo, crear usuario temporal si no existe
+
+    // Manejar conexión de red según selección
+    const cajaMode = cajaSelect ? cajaSelect.value : 'local';
+    if (cajaMode === 'server') {
+      const result = await startAsServer(3000);
+      if (!result.ok) toast('Error al iniciar servidor: ' + (result.error || ''), 'error', 3500);
+    } else if (cajaMode === 'client') {
+      const ip = $('#loginServerIP')?.value?.trim();
+      if (!ip) { toast('Ingrese la IP del servidor', 'warn'); return; }
+      const result = await connectToServer(ip, 3000);
+      if (!result.ok) toast('Error al conectar: ' + (result.error || ''), 'error', 3500);
+    }
+
     if (isDemoLogin && !user) {
       const demoUser = {
         id: Date.now(), username: u, name: u === 'admin' ? 'Administrador Demo' : 'Cajero Demo',
@@ -76,6 +94,11 @@ function showApp() {
   $('#userAvatar').textContent = session.user.name.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
   $('#posCashierName').textContent = session.user.name;
   $('#statusCashier').textContent = session.user.name;
+  // Mostrar info de caja
+  const cajaInfo = document.querySelector('.pos-topstrip-left b');
+  if (cajaInfo) cajaInfo.textContent = getCajaId();
+  const cajaNameEl = document.getElementById('posCajaName');
+  if (cajaNameEl) cajaNameEl.textContent = getCajaNombre();
   // Banner de demostración
   if (isDemo()) {
     const existing = document.getElementById('demoBanner');
@@ -90,6 +113,8 @@ function showApp() {
   // Los cajeros no acceden a la administración
   const isAdmin = session.role !== 'cashier';
   $('#openDashboardBtn').style.display = isAdmin ? '' : 'none';
+  // Actualizar estado de red
+  updateNetworkStatusUI();
   showPOS();
   // Apertura de caja obligatoria para cajeros
   if (session.role === 'cashier' && !db.jornada?.active) {
@@ -142,6 +167,9 @@ function updateDate() {
 function bindGlobal() {
   // Botón "Panel Admin" del top strip
   $('#openDashboardBtn').addEventListener('click', () => showDashboard('overview'));
+  // Botón de configuración de red
+  const netBtn = $('#btnNetConfig');
+  if (netBtn) netBtn.addEventListener('click', openNetworkConfig);
   // Logout
   const lo = $('#btnLogout'); if (lo) lo.addEventListener('click', logout);
   const polo = $('#btnPosLogout'); if (polo) polo.addEventListener('click', logout);

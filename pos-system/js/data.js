@@ -4,7 +4,7 @@
    Persistencia dual:
    - Escritorio (Electron): SQLite a través de window.posdesktop (IPC).
    - Navegador (dev): localStorage como respaldo.
-   El estado se hidrata desde la fuente antes de arrancar la UI.
+   Multi-caja: cada operación lleva caja_id y numeración propia.
    ============================================================ */
 const DB_KEY = 'possystem_db_v1';
 
@@ -56,12 +56,66 @@ const seedData = {
       usdRate: 36.00,
       receiptFooter: '¡Gracias por su compra!\nVuelva pronto'
     },
-    branches: ['Principal', 'Sucursal Norte', 'Sucursal Sur']
+    branches: ['Principal', 'Sucursal Norte', 'Sucursal Sur'],
+    cajas: {}
   },
 
   jornada: { openedOnce: false, active: false, openedAt: null },
   jornadaZ: []
 };
+
+/* ============================================================
+   Multi-caja: ID y numeración independiente
+   ============================================================ */
+let currentCajaId = null;
+let currentCajaNombre = 'Caja Principal';
+
+async function initCajaId() {
+  if (!isDesktop()) {
+    currentCajaId = localStorage.getItem('pos_caja_id') || 'CAJA-LOCAL';
+    currentCajaNombre = localStorage.getItem('pos_caja_nombre') || 'Caja Local';
+    return;
+  }
+  try {
+    currentCajaId = await window.posdesktop.cajaGetId();
+  } catch (e) {
+    currentCajaId = 'CAJA-LOCAL';
+  }
+}
+
+function getCajaId() { return currentCajaId || 'CAJA-LOCAL'; }
+function getCajaNombre() { return currentCajaNombre || 'Caja Principal'; }
+function setCajaInfo(id, nombre) {
+  currentCajaId = id;
+  currentCajaNombre = nombre || id;
+  if (!isDesktop()) {
+    localStorage.setItem('pos_caja_id', id);
+    localStorage.setItem('pos_caja_nombre', nombre || '');
+  }
+}
+
+/* Numeración de facturación independiente por caja */
+function getInvoicePrefix() {
+  const cajaConf = db.settings?.cajas?.[getCajaId()];
+  return cajaConf?.prefijo || getCajaId()?.slice(-2) || '01';
+}
+
+function nextInvoiceNumber() {
+  const cajaConf = db.settings?.cajas?.[getCajaId()];
+  if (!cajaConf) {
+    if (!db.settings.cajas) db.settings.cajas = {};
+    db.settings.cajas[getCajaId()] = { nextNumber: 1, prefijo: getInvoicePrefix() };
+  }
+  const n = db.settings.cajas[getCajaId()].nextNumber || 1;
+  db.settings.cajas[getCajaId()].nextNumber = n + 1;
+  return n;
+}
+
+function buildInvoiceNumber() {
+  const prefix = getInvoicePrefix();
+  const n = nextInvoiceNumber();
+  return prefix + String(n).padStart(8, '0');
+}
 
 const isDesktop = () => !!(typeof window !== 'undefined' && window.posdesktop);
 
@@ -88,19 +142,22 @@ const DB = {
   save(data) {
     try { localStorage.setItem(DB_KEY, JSON.stringify(data)); } catch (e) {}
     if (isDesktop() && window.posdesktop.stateSave) {
-      // Persistencia en SQLite (no bloqueante)
       window.posdesktop.stateSave(data).catch(err => console.error('[state:save]', err));
     }
   },
   reset() {
     localStorage.removeItem(DB_KEY);
     if (isDesktop()) {
-      // En escritorio también se limpia la fila en SQLite guardando el seed
       const fresh = JSON.parse(JSON.stringify(seedData));
       this.save(fresh);
       return fresh;
     }
     return this.load();
+  },
+  /* Encola una operación para sync offline (multi-caja) */
+  queueSync(operacion, tabla, datos) {
+    if (!isDesktop() || !window.posdesktop.syncPush) return;
+    window.posdesktop.syncPush(operacion, tabla, datos).catch(() => {});
   }
 };
 
@@ -108,17 +165,23 @@ const db = DB.load();
 let session = { user: null, role: null };
 
 /* Hidrata `db` desde SQLite (escritorio) reemplazando en su lugar el contenido.
-   Se invoca antes de `boot()` para que toda la UI trabaje con datos reales. */
+   Se invoca antes de `boot()` para que toda la UI trabaje con datos reales.
+   Multi-caja: inicializa el ID de caja antes de hidratar. */
 async function hydrateFromSource() {
+  await initCajaId();
   if (!isDesktop() || !window.posdesktop.stateLoad) return;
   try {
     const res = await window.posdesktop.stateLoad();
     if (res && res.ok && res.state && typeof res.state === 'object') {
       Object.keys(db).forEach(k => delete db[k]);
       Object.assign(db, res.state);
-      console.info('[data] estado cargado desde SQLite');
+      // Asegurar arrays y objetos necesarios
+      if (!db.settings) db.settings = seedData.settings;
+      if (!db.settings.cajas) db.settings.cajas = {};
+      if (!db.jornada) db.jornada = { openedOnce: false, active: false };
+      if (!db.jornadaZ) db.jornadaZ = [];
+      console.info('[data] estado cargado desde SQLite · Caja:', getCajaId());
     } else {
-      // Primera ejecución en escritorio: persistir el seed (en blanco)
       window.posdesktop.stateSave(db).catch(() => {});
       console.info('[data] SQLite vacío; inicializado con estado en blanco');
     }
@@ -234,4 +297,95 @@ function veHm12(stamp) {
 function veNowDate() {
   const o = veParts();
   return new Date(o.year, o.month - 1, o.day, o.hour, o.minute, o.second);
+}
+
+/* ============================================================
+   Multi-caja: funciones exportadas
+   ============================================================ */
+function setCurrentCajaInfo(id, nombre) { setCajaInfo(id, nombre); }
+function getCurrentCajaId() { return getCajaId(); }
+function getCurrentCajaNombre() { return getCajaNombre(); }
+function getInvoicePrefixForCaja() { return getInvoicePrefix(); }
+function generateInvoiceNumber() { return buildInvoiceNumber(); }
+
+/* Obtiene la numeración de una factura para una caja específica (sin incrementar) */
+function peekInvoiceNumber(cajaId) {
+  const cid = cajaId || getCajaId();
+  const cajaConf = db.settings?.cajas?.[cid];
+  const prefix = cajaConf?.prefijo || cid?.slice(-2) || '01';
+  const n = cajaConf?.nextNumber || 1;
+  return prefix + String(n).padStart(8, '0');
+}
+
+/* Registra una venta con caja_id para aislamiento de datos */
+function registerSale(saleData) {
+  const sale = {
+    ...saleData,
+    caja_id: getCajaId(),
+    caja_nombre: getCajaNombre()
+  };
+  db.sales.unshift(sale);
+  DB.queueSync('insert', 'sales', sale);
+  DB.save(db);
+  return sale;
+}
+
+/* Registra una compra con caja_id */
+function registerPurchase(purchaseData) {
+  const purchase = {
+    ...purchaseData,
+    caja_id: getCajaId(),
+    caja_nombre: getCajaNombre()
+  };
+  db.purchases.unshift(purchase);
+  DB.queueSync('insert', 'purchases', purchase);
+  DB.save(db);
+  return purchase;
+}
+
+/* Registra un movimiento de caja con caja_id */
+function registerCashbox(cashData) {
+  const movement = {
+    ...cashData,
+    caja_id: getCajaId(),
+    caja_nombre: getCajaNombre()
+  };
+  db.cashbox.unshift(movement);
+  DB.queueSync('insert', 'cashbox', movement);
+  DB.save(db);
+  return movement;
+}
+
+/* Registra un reembolso con caja_id */
+function registerRefund(refundData) {
+  const refund = {
+    ...refundData,
+    caja_id: getCajaId(),
+    caja_nombre: getCajaNombre()
+  };
+  if (!db.refunds) db.refunds = [];
+  db.refunds.unshift(refund);
+  DB.queueSync('insert', 'refunds', refund);
+  DB.save(db);
+  return refund;
+}
+
+/* Filtra ventas por caja_id (o todas si es null) */
+function filterSalesByCaja(cajaId) {
+  if (!cajaId) return db.sales;
+  return db.sales.filter(s => s.caja_id === cajaId);
+}
+
+/* Resumen de ventas por cada caja */
+function salesSummaryByCaja() {
+  const summary = {};
+  db.sales.forEach(s => {
+    const cid = s.caja_id || 'sin-caja';
+    if (!summary[cid]) summary[cid] = { caja_id: cid, caja_nombre: s.caja_nombre || cid, ventas: 0, total: 0, credito: 0, contado: 0 };
+    summary[cid].ventas++;
+    summary[cid].total += Number(s.total) || 0;
+    if (s.status === 'credit') summary[cid].credito += Number(s.total) || 0;
+    else summary[cid].contado += Number(s.total) || 0;
+  });
+  return Object.values(summary);
 }

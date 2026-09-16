@@ -31,18 +31,23 @@
         <button type="button" class="rtab" data-role="cashier">Cajero</button>
       </div>
       <form id="loginForm" class="login-form">
+        <label>Caja
+          <select id="loginCaja">
+            <option value="local">Caja Local (standalone)</option>
+            <option value="server">Actuar como Servidor</option>
+            <option value="client">Conectarse a un Servidor</option>
+          </select>
+        </label>
+        <div id="clientIPBox" style="display:none">
+          <label>IP del Servidor
+            <input type="text" id="loginServerIP" placeholder="192.168.1.100" />
+          </label>
+        </div>
         <label>Usuario
           <input type="text" id="loginUser" value="admin" required autocomplete="username" />
         </label>
         <label>Contraseña
           <input type="password" id="loginPass" value="admin" required autocomplete="current-password" />
-        </label>
-        <label>Caja
-          <select id="loginCaja">
-            <option>Caja Principal</option>
-            <option>Caja Norte</option>
-            <option>Caja Sur</option>
-          </select>
         </label>
         <button type="submit" class="btn-login">INGRESAR AL SISTEMA</button>
       </form>
@@ -98,6 +103,12 @@
         <b>Principal</b>
       </div>
       <div class="pos-topstrip-right">
+        <span id="netStatus" class="pos-strip-btn" style="cursor:default;font-size:11px" title="Estado de red multi-caja">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin-right:4px"></span>Sin red
+        </span>
+        <button class="pos-strip-btn" id="btnNetConfig" title="Configurar red multi-caja">
+          <span class="strip-icon"><img class="ic" data-ic="refresh" alt="" /></span> Red
+        </button>
         <button class="pos-strip-btn" id="openDashboardBtn" title="Ir al panel administrativo">
           <span class="strip-icon"><img class="ic" data-ic="panel" alt="" /></span> Panel Admin
         </button>
@@ -240,6 +251,8 @@
       <button class="nav-item tool-item" data-view="cashbox"><img class="ic" data-ic="am-caja" alt="" /><span>Caja / Bancos</span></button>
       <button class="nav-item tool-item" data-view="reports"><img class="ic" data-ic="am-reportes" alt="" /><span>Reportes</span></button>
       <button class="nav-item tool-item" data-view="users"><img class="ic" data-ic="am-usuarios" alt="" /><span>Usuarios</span></button>
+      <button class="nav-item tool-item" data-view="cajas"><img class="ic" data-ic="am-caja" alt="" /><span>Cajas</span></button>
+      <button class="nav-item tool-item" data-view="network"><img class="ic" data-ic="am-config" alt="" /><span>Red</span></button>
       <button class="nav-item tool-item" data-view="settings"><img class="ic" data-ic="am-config" alt="" /><span>Configuración</span></button>
     </nav>
 
@@ -280,6 +293,7 @@
 <script src="js/data.js"></script>
 <script src="js/inventory.js"></script>
 <script src="js/icons.js"></script>
+<script src="js/network.js"></script>
 <script src="js/app.js"></script>
 <script src="js/pos.js"></script>
 <script src="js/dashboard.js"></script>

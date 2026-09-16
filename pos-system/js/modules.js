@@ -826,6 +826,7 @@ function productForm(id, cloneSourceId) {
    ============================================================ */
 function renderSales() {
   const total = db.sales.reduce((s, x) => s + x.total, 0);
+  const cajas = [...new Set(db.sales.map(s => s.caja_id).filter(Boolean))];
   const html = `
     <div class="module-head">
       <h3>Historial de ventas</h3>
@@ -836,17 +837,24 @@ function renderSales() {
       <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Contado</div><div class="val">${db.sales.filter(s => s.status === 'paid').length}</div></div><div class="kpi-ico">${ico('check')}</div></div>
       <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">A crédito</div><div class="val">${db.sales.filter(s => s.status === 'credit').length}</div></div><div class="kpi-ico">${ico('pending')}</div></div>
     </div>
+    ${cajas.length > 1 ? `<div class="grid cols-${Math.min(cajas.length, 4)}" style="margin-bottom:14px">
+      ${cajas.map(cid => {
+        const ss = db.sales.filter(s => s.caja_id === cid);
+        return `<div class="kpi k-blue"><div class="kpi-info"><div class="lbl">${cid}</div><div class="val">${fmt.money(ss.reduce((s,x)=>s+x.total,0))}</div><div class="delta">${ss.length} ventas</div></div><div class="kpi-ico">${ico('cashbox')}</div></div>`;
+      }).join('')}
+    </div>` : ''}
     <div class="dt">
       <div class="dt-toolbar">
         <h3>Ventas registradas</h3>
         <div class="tools">
           <input class="search" id="salSearch" placeholder="Buscar por cliente o número..." />
           <select id="salStatus"><option value="">Todas</option><option value="paid">Pagadas</option><option value="credit">A crédito</option><option value="refunded">Reembolsadas</option></select>
+          ${cajas.length > 1 ? `<select id="salCaja"><option value="">Todas las cajas</option>${cajas.map(c => `<option value="${c}">${c}</option>`).join('')}</select>` : ''}
         </div>
       </div>
       <div class="dt-wrap">
         <table class="dt">
-          <thead><tr><th>Fecha</th><th>N° Recibo</th><th>Cliente</th><th class="num">Items</th><th class="num">Total</th><th>Estado</th></tr></thead>
+          <thead><tr><th>Fecha</th><th>N° Recibo</th><th>Caja</th><th>Cliente</th><th class="num">Items</th><th class="num">Total</th><th>Estado</th></tr></thead>
           <tbody id="salTbody"></tbody>
         </table>
       </div>
@@ -856,23 +864,27 @@ function renderSales() {
   paintSales();
   $('#salSearch').addEventListener('input', paintSales);
   $('#salStatus').addEventListener('change', paintSales);
+  $('#salCaja')?.addEventListener('change', paintSales);
 }
 
 function paintSales() {
   const q = ($('#salSearch')?.value || '').toLowerCase();
   const st = $('#salStatus')?.value || '';
+  const cid = $('#salCaja')?.value || '';
   const list = db.sales.filter(s => {
     if (st && s.status !== st) return false;
+    if (cid && s.caja_id !== cid) return false;
     if (q && !s.client.toLowerCase().includes(q) && !s.number.includes(q)) return false;
     return true;
   });
   const tb = $('#salTbody');
   if (!tb) return;
-  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="6" class="empty">Sin ventas</td></tr>`; return; }
+  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">Sin ventas</td></tr>`; return; }
   tb.innerHTML = list.map(s => `
     <tr>
       <td>${s.date}</td>
       <td><code>${s.number}</code></td>
+      <td><small>${s.caja_id || '—'}</small></td>
       <td>${s.client}</td>
       <td class="num">${s.items}</td>
       <td class="num">${fmt.money(s.total)}</td>
@@ -2274,4 +2286,254 @@ function renderSettings() {
 
   $$('.tab').forEach(t => t.addEventListener('click', () => paintTab(t.dataset.tab)));
   paintTab('company');
+}
+
+/* ============================================================
+   GESTIÓN DE CAJAS (multi-caja)
+   ============================================================ */
+function renderCajas() {
+  const cajas = isDesktop() ? (db.settings?.cajas || {}) : {};
+  const cajaEntries = Object.entries(cajas);
+  const totalVentas = db.sales.length;
+  const resumen = salesSummaryByCaja();
+
+  const html = `
+    <div class="module-head">
+      <h3>Gestión de Cajas</h3>
+      <div class="actions">
+        <button class="btn" id="cjNetConfig">${ico('refresh')} Configurar Red</button>
+        <button class="btn primary" id="cjNew">+ Nueva Caja</button>
+      </div>
+    </div>
+    <div class="grid cols-4" style="margin-bottom:14px">
+      <div class="kpi"><div class="kpi-info"><div class="lbl">Cajas registradas</div><div class="val">${resumen.length || 1}</div></div><div class="kpi-ico">${ico('cashbox')}</div></div>
+      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Caja actual</div><div class="val">${getCajaId()}</div></div><div class="kpi-ico">${ico('check')}</div></div>
+      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Ventas totales</div><div class="val">${totalVentas}</div></div><div class="kpi-ico">${ico('cxc')}</div></div>
+      <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">Ventas esta caja</div><div class="val">${filterSalesByCaja(getCajaId()).length}</div></div><div class="kpi-ico">${ico('sales')}</div></div>
+    </div>
+    <div class="dt">
+      <div class="dt-toolbar"><h3>Cajas y su actividad</h3></div>
+      <div class="dt-wrap">
+        <table class="dt">
+          <thead><tr><th>ID Caja</th><th>Nombre</th><th>Prefijo</th><th>Próx. #</th><th class="num">Ventas</th><th class="num">Total vendido</th><th>Estado</th><th></th></tr></thead>
+          <tbody>
+            ${resumen.map(r => `
+              <tr>
+                <td><code>${r.caja_id}</code></td>
+                <td>${r.caja_nombre}</td>
+                <td>${(db.settings?.cajas?.[r.caja_id]?.prefijo || r.caja_id?.slice(-2) || '01')}</td>
+                <td>${db.settings?.cajas?.[r.caja_id]?.nextNumber || 1}</td>
+                <td class="num">${r.ventas}</td>
+                <td class="num"><b>${fmt.money(r.total)}</b></td>
+                <td>${r.caja_id === getCajaId() ? '<span class="pill green">Actual</span>' : '<span class="pill blue">Otra</span>'}</td>
+                <td></td>
+              </tr>`).join('')}
+            ${resumen.length === 0 ? `
+              <tr>
+                <td><code>${getCajaId()}</code></td>
+                <td>${getCajaNombre()}</td>
+                <td>${getInvoicePrefix()}</td>
+                <td>${db.settings?.cajas?.[getCajaId()]?.nextNumber || 1}</td>
+                <td class="num">0</td>
+                <td class="num">$ 0.00</td>
+                <td><span class="pill green">Actual</span></td>
+                <td></td>
+              </tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3 class="card-title">Configuración de numeración por caja</h3>
+      <p style="color:#6b7280;font-size:12px;margin:0 0 10px">Cada caja tiene su propio prefijo y secuencia de numeración de facturas, presupuestos, etc.</p>
+      <div class="dt-wrap">
+        <table class="dt">
+          <thead><tr><th>Caja</th><th>Prefijo factura</th><th>Próximo número</th><th></th></tr></thead>
+          <tbody id="cjConfigTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  $('#dashContent').innerHTML = html;
+
+  // Pintar configuración de numeración
+  const configTb = $('#cjConfigTbody');
+  if (configTb) {
+    const allCajas = new Set(resumen.map(r => r.caja_id));
+    allCajas.add(getCajaId());
+    configTb.innerHTML = [...allCajas].map(cid => {
+      const conf = db.settings?.cajas?.[cid] || {};
+      const pref = conf.prefijo || cid?.slice(-2) || '01';
+      const next = conf.nextNumber || 1;
+      return `<tr>
+        <td><code>${cid}</code></td>
+        <td><input class="cj-pref" data-caja="${cid}" value="${pref}" style="width:80px" /></td>
+        <td><input type="number" class="cj-next" data-caja="${cid}" value="${next}" min="1" style="width:100px" /></td>
+        <td><button class="btn sm primary cj-save" data-caja="${cid}">Guardar</button></td>
+      </tr>`;
+    }).join('');
+    configTb.querySelectorAll('.cj-save').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cid = btn.dataset.caja;
+        const pref = configTb.querySelector(`.cj-pref[data-caja="${cid}"]`).value;
+        const next = parseInt(configTb.querySelector(`.cj-next[data-caja="${cid}"]`).value) || 1;
+        if (!db.settings.cajas) db.settings.cajas = {};
+        db.settings.cajas[cid] = { ...(db.settings.cajas[cid] || {}), prefijo: pref, nextNumber: next };
+        DB.save(db);
+        toast(`Numeración de ${cid} actualizada`, 'success');
+      });
+    });
+  }
+
+  $('#cjNew')?.addEventListener('click', () => cajaForm());
+  $('#cjNetConfig')?.addEventListener('click', openNetworkConfig);
+}
+
+function cajaForm() {
+  const html = `
+    <div class="form-grid">
+      <div class="field"><label>Nombre de la caja</label><input id="cjfName" placeholder="Ej: Caja Norte" /></div>
+      <div class="field"><label>Prefijo de facturación</label><input id="cjfPref" value="02" maxlength="4" /></div>
+      <div class="field"><label>Tipo</label>
+        <select id="cjfType"><option value="cliente">Cliente (se conecta a servidor)</option><option value="servidor">Servidor (principal)</option></select>
+      </div>
+      <div class="field"><label>Cajero asignado (opcional)</label>
+        <select id="cjfCashier"><option value="">— Ninguno —</option>${db.users.filter(u => u.role === 'cashier').map(u => `<option value="${u.username}">${u.name}</option>`).join('')}</select>
+      </div>
+    </div>
+  `;
+  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
+                  <button class="btn primary" id="cjfSave">Crear caja</button>`;
+  openModal({ title: 'Nueva Caja', body: html, footer });
+  setTimeout(() => {
+    $('#cjfSave').addEventListener('click', () => {
+      const name = $('#cjfName').value.trim();
+      if (!name) { toast('Ingrese el nombre de la caja', 'warn'); return; }
+      const cid = 'CAJA-' + name.replace(/\s+/g, '-').toUpperCase().slice(0, 12) + '-' + Date.now().toString(36).slice(-4).toUpperCase();
+      if (!db.settings.cajas) db.settings.cajas = {};
+      db.settings.cajas[cid] = { prefijo: $('#cjfPref').value || '02', nextNumber: 1 };
+      DB.save(db);
+      closeModal();
+      renderCajas();
+      toast('Caja "' + name + '" creada', 'success');
+    });
+  }, 60);
+}
+
+/* ============================================================
+   RED / MULTI-CAJA (vista dashboard)
+   ============================================================ */
+function renderNetwork() {
+  const net = getNetworkStatus();
+  const pending = 0;
+  const html = `
+    <div class="module-head">
+      <h3>Red / Multi-Caja</h3>
+      <div class="actions">
+        <button class="btn" id="rnRefresh">Actualizar</button>
+      </div>
+    </div>
+    <div class="grid cols-3" style="margin-bottom:14px">
+      <div class="kpi"><div class="kpi-info"><div class="lbl">Modo</div><div class="val">${net.role === 'servidor' ? 'Servidor' : net.role === 'cliente' ? 'Cliente' : 'Standalone'}</div></div><div class="kpi-ico">${ico('cashbox')}</div></div>
+      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Estado</div><div class="val">${net.connected ? 'Conectado' : 'Desconectado'}</div></div><div class="kpi-ico">${net.connected ? ico('check') : ico('close')}</div></div>
+      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">IP Local</div><div class="val" id="rnLocalIP">...</div></div><div class="kpi-ico">${ico('refresh')}</div></div>
+    </div>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3 class="card-title">Servidor</h3>
+        <p style="font-size:13px;color:#6b7280;margin:0 0 10px">Inicie un servidor para que otras cajas se conecten. La caja servidor comparte catálogos (productos, clientes, etc.) y recibe ventas de las cajas cliente.</p>
+        ${net.role === 'servidor'
+          ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px;margin-bottom:10px"><b style="color:#15803d">Servidor activo</b><br><small style="color:#6b7280">IP: ${net.serverIP || '...'} · Las cajas cliente se conectan a esta dirección.</small></div>
+             <button class="btn danger" id="rnStopServer">Detener Servidor</button>`
+          : `<div class="field"><label>Puerto</label><input type="number" id="rnPort" value="3000" /></div>
+             <button class="btn primary" id="rnStartServer" style="margin-top:8px">Iniciar Servidor</button>`
+        }
+      </div>
+      <div class="card">
+        <h3 class="card-title">Cliente</h3>
+        <p style="font-size:13px;color:#6b7280;margin:0 0 10px">Conectarse a otra caja que actúe como servidor. Los catálogos se sincronizan automáticamente.</p>
+        ${net.role === 'cliente'
+          ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:10px"><b style="color:#1e40af">Conectado al servidor</b><br><small style="color:#6b7280">IP: ${net.serverIP || '...'}</small></div>
+             <button class="btn danger" id="rnDisconnect">Desconectar</button>`
+          : `<div class="field"><label>IP del servidor</label><input id="rnServerIP" placeholder="192.168.1.100" /></div>
+             <div class="field"><label>Puerto</label><input type="number" id="rnClientPort" value="3000" /></div>
+             <button class="btn primary" id="rnConnect" style="margin-top:8px">Conectar</button>`
+        }
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3 class="card-title">Sincronización</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <p style="font-size:12px;color:#6b7280;margin:0">Las operaciones offline se encolan y sincronizan automáticamente cuando hay conexión.</p>
+          <p style="font-size:12px;color:#6b7280;margin:4px 0 0">Operaciones pendientes: <b id="rnPending">0</b> · Última sync: <b id="rnLastSync">Nunca</b></p>
+        </div>
+        <button class="btn" id="rnForceSync">Forzar sincronización</button>
+      </div>
+    </div>
+  `;
+  $('#dashContent').innerHTML = html;
+
+  // Obtener IP local
+  if (isDesktop() && window.posdesktop.netGetIP) {
+    window.posdesktop.netGetIP().then(ip => {
+      const el = document.getElementById('rnLocalIP');
+      if (el) el.textContent = ip;
+    });
+  }
+
+  // Verificar pending
+  if (isDesktop() && window.posdesktop.syncPending) {
+    window.posdesktop.syncPending().then(r => {
+      const el = document.getElementById('rnPending');
+      if (el && r.ok) el.textContent = r.pending.length;
+    });
+  }
+
+  // Binds
+  $('#rnStartServer')?.addEventListener('click', async () => {
+    const port = parseInt($('#rnPort').value) || 3000;
+    await startAsServer(port);
+    renderNetwork();
+  });
+  $('#rnStopServer')?.addEventListener('click', async () => {
+    await stopNetwork();
+    renderNetwork();
+  });
+  $('#rnConnect')?.addEventListener('click', async () => {
+    const ip = $('#rnServerIP').value.trim();
+    const port = parseInt($('#rnClientPort').value) || 3000;
+    if (!ip) { toast('Ingrese la IP del servidor', 'warn'); return; }
+    await connectToServer(ip, port);
+    renderNetwork();
+  });
+  $('#rnDisconnect')?.addEventListener('click', async () => {
+    await stopNetwork();
+    renderNetwork();
+  });
+  $('#rnForceSync')?.addEventListener('click', async () => {
+    await forceSync();
+    toast('Sincronización forzada', 'success');
+  });
+  $('#rnRefresh')?.addEventListener('click', () => renderNetwork());
+}
+
+/* ============================================================
+   RESUMEN: Ventas por caja (en overview)
+   ============================================================ */
+function renderSalesByCajaKPIs() {
+  const summary = salesSummaryByCaja();
+  if (summary.length <= 1) return '';
+  return `<div class="grid cols-${Math.min(summary.length, 4)}" style="margin-bottom:14px">
+    ${summary.map(r => `
+      <div class="kpi ${r.caja_id === getCajaId() ? '' : 'k-blue'}">
+        <div class="kpi-info">
+          <div class="lbl">${r.caja_nombre}</div>
+          <div class="val">${fmt.money(r.total)}</div>
+          <div class="delta">${r.ventas} ventas · ${r.caja_id}</div>
+        </div>
+        <div class="kpi-ico">${ico('cashbox')}</div>
+      </div>
+    `).join('')}
+  </div>`;
 }

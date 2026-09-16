@@ -16,6 +16,8 @@ const DASH_VIEWS = {
   cashbox:    { title: 'Caja y Bancos',        crumb: 'Finanzas › Caja',                    render: () => renderCashbox() },
   reports:    { title: 'Reportes',             crumb: 'Finanzas › Reportes',                render: () => renderReports() },
   users:      { title: 'Usuarios',             crumb: 'Sistema › Usuarios',                 render: () => renderUsers() },
+  cajas:      { title: 'Gestión de Cajas',     crumb: 'Sistema › Cajas',                    render: () => renderCajas() },
+  network:    { title: 'Red / Multi-Caja',     crumb: 'Sistema › Red',                      render: () => renderNetwork() },
   settings:   { title: 'Configuración',        crumb: 'Sistema › Configuración',            render: () => renderSettings() }
 };
 
@@ -52,19 +54,22 @@ function renderOverview() {
   const monthExpense = db.accounting.filter(a => a.type === 'egreso' && a.date.startsWith(today.slice(0, 7))).reduce((s, a) => s + a.amount, 0);
   const prods = db.products.map(p => { canonicalizeProduct(p); return p; });
   const lowStock = prods.filter(p => invStock(p) < Math.max(1, Number(p.stockMinimo) || 20)).length;
+  const cajaSalesToday = filterSalesByCaja(getCajaId()).filter(s => s.date.startsWith(today));
 
   $('#dashContent').innerHTML = `
     <div class="session-card">
       <div class="avatar">${session.user.name.split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase()}</div>
       <div style="flex:1">
         <strong>Hola, ${session.user.name}</strong>
-        <div style="font-size:12px;color:#6b7280">Rol: ${session.user.role} · Sucursal: Principal · ${fmt.dateLong(new Date().toISOString())}</div>
+        <div style="font-size:12px;color:#6b7280">Rol: ${session.user.role} · Caja: ${getCajaId()} · ${fmt.dateLong(new Date().toISOString())}</div>
       </div>
     </div>
 
+    ${typeof renderSalesByCajaKPIs === 'function' ? renderSalesByCajaKPIs() : ''}
+
     <div class="grid cols-4" style="margin-bottom:14px">
-      <div class="kpi"><div class="kpi-info"><div class="lbl">Ventas hoy</div><div class="val">${fmt.money(todayTotal)}</div><div class="delta up">${ico('arrowUp')} ${todaySales.length} operaciones</div></div><div class="kpi-ico">${ico('cxc')}</div></div>
-      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Ventas del mes</div><div class="val">${fmt.money(monthTotal)}</div><div class="delta up">${ico('arrowUp')} ${monthSales.length} ventas</div></div><div class="kpi-ico">${ico('reports')}</div></div>
+      <div class="kpi"><div class="kpi-info"><div class="lbl">Ventas hoy (esta caja)</div><div class="val">${fmt.money(cajaSalesToday.reduce((s, x) => s + x.total, 0))}</div><div class="delta up">${ico('arrowUp')} ${cajaSalesToday.length} ops</div></div><div class="kpi-ico">${ico('cxc')}</div></div>
+      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Ventas hoy (todas)</div><div class="val">${fmt.money(todayTotal)}</div><div class="delta up">${ico('arrowUp')} ${todaySales.length} ops</div></div><div class="kpi-ico">${ico('reports')}</div></div>
       <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">Por cobrar (CxC)</div><div class="val">${fmt.money(totalCxc)}</div><div class="delta">${db.receivables.filter(r => r.status !== 'paid').length} facturas</div></div><div class="kpi-ico">${ico('export')}</div></div>
       <div class="kpi k-red"><div class="kpi-info"><div class="lbl">Por pagar (CxP)</div><div class="val">${fmt.money(totalCxp)}</div><div class="delta">${db.payables.filter(p => p.status !== 'paid').length} facturas</div></div><div class="kpi-ico">${ico('import')}</div></div>
     </div>

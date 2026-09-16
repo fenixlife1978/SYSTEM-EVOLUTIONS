@@ -6,7 +6,7 @@
 let ticket = {
   items: [],
   customer: db.clients[0],
-  number: '010000' + String(db.settings.invoice.nextNumber).padStart(4, '0')
+  number: generateInvoiceNumber()
 };
 
 // Métodos de pago (orden de presentación). cur: BS | USD
@@ -760,7 +760,7 @@ function finalizeSale(total, base, tax, payData) {
   const isCredit = !!($('#chkCredito') && $('#chkCredito').checked);
   const payments = isCredit ? [] : (payData.payments || []);
   const method = isCredit ? 'credit' : (payments.length === 1 ? payments[0].method : (payments.length > 1 ? 'mixto' : 'efectivoUsd'));
-  // Registrar venta
+  // Registrar venta con caja_id para aislamiento multi-caja
   const sale = {
     id: db.sales.length + 1,
     date: veStamp(),
@@ -773,6 +773,8 @@ function finalizeSale(total, base, tax, payData) {
     payments: payments,
     changeUSD: payData.changeUSD || 0,
     status: isCredit ? 'credit' : 'paid',
+    caja_id: getCajaId(),
+    caja_nombre: getCajaNombre(),
     lines: ticket.items.map(it => ({
       pid: it.id, code: it.code, name: it.name, present: it.present || '',
       qty: it.qty, content: it.content || 1,
@@ -781,6 +783,8 @@ function finalizeSale(total, base, tax, payData) {
     }))
   };
   db.sales.unshift(sale);
+  // Encolar para sync offline multi-caja
+  DB.queueSync('insert', 'sales', sale);
   // Descontar stock en la UNIDAD CANÓNICA (fuente única): it.content = equiv (unidades canónicas por presentación vendida)
   const allowNeg = !!posCfg().allowNegativeStock;
   ticket.items.forEach(it => {
@@ -840,7 +844,7 @@ function finalizeSale(total, base, tax, payData) {
 function resetTicket() {
   ticket.items = [];
   ticket.customer = defaultCustomerClient();
-  ticket.number = '0100' + String(db.settings.invoice.nextNumber).padStart(4, '0');
+  ticket.number = generateInvoiceNumber();
   $('#rcptCustomerCode').textContent = ticket.customer.code;
   $('#rcptCustomerName').textContent = ticket.customer.name;
   $('#rcptCustomerTax').textContent = ticket.customer.taxId || '';
