@@ -1294,7 +1294,7 @@ function renderCxC() {
       </div>
       <div class="dt-wrap">
         <table class="dt">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Documento</th><th>Cliente</th><th>Vence</th><th class="num">Total</th><th class="num">Pagado</th><th class="num">Saldo</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Documento</th><th>Cliente</th><th>Vence</th><th class="num">Total</th><th class="num">Pagado</th><th class="num">Saldo</th><th>Estado</th><th>Acciones</th></tr></thead>
           <tbody id="cxcTbody"></tbody>
         </table>
       </div>
@@ -1315,7 +1315,8 @@ function paintCxC() {
   if (list.length === 0) { tb.innerHTML = `<tr><td colspan="10" class="empty">Sin documentos</td></tr>`; return; }
   tb.innerHTML = list.map(r => {
     const overdue = r.status !== 'paid' && new Date(r.dueDate) < new Date();
-    return `<tr>
+    const hasSale = db.sales.some(s => s.number === r.docNumber);
+    return `<tr style="${hasSale ? 'cursor:pointer' : ''}" ${hasSale ? `data-docnum="${esc(r.docNumber)}"` : ''}>
       <td>${fmt.date(r.date)}</td>
       <td>${r.docType}</td>
       <td><code>${r.docNumber}</code></td>
@@ -1325,10 +1326,26 @@ function paintCxC() {
       <td class="num">${fmt.money(r.paid)}</td>
       <td class="num"><b>${fmt.money(r.balance)}</b></td>
       <td>${statusPill(r.status)}</td>
-      <td class="actions-cell">${r.status !== 'paid' ? `<button class="btn sm primary" data-pay="${r.id}">Pagar</button>` : ''}</td>
+      <td class="actions-cell">
+        ${hasSale ? `<button class="btn sm" data-viewcxc="${esc(r.docNumber)}" title="Ver detalle de la venta">Ver</button>` : ''}
+        ${r.status !== 'paid' ? `<button class="btn sm primary" data-pay="${r.id}">Pagar</button>` : ''}
+      </td>
     </tr>`;
   }).join('');
-  $$('button[data-pay]', tb).forEach(b => b.addEventListener('click', () => paymentForm(+b.dataset.pay)));
+  $$('button[data-pay]', tb).forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); paymentForm(+b.dataset.pay); }));
+  $$('button[data-viewcxc]', tb).forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const docNum = b.dataset.viewcxc;
+    const sale = db.sales.find(s => s.number === docNum);
+    if (sale && typeof posLastDetail === 'function') posLastDetail(sale.id);
+    else toast('Venta no encontrada', 'warn');
+  }));
+  $$('tr[data-docnum]', tb).forEach(row => row.addEventListener('click', () => {
+    const docNum = row.dataset.docnum;
+    const sale = db.sales.find(s => s.number === docNum);
+    if (sale && typeof posLastDetail === 'function') posLastDetail(sale.id);
+    else toast('Venta no encontrada para este documento', 'warn');
+  }));
 }
 
 function cxcForm() {
