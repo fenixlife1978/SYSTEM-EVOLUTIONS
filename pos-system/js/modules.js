@@ -707,190 +707,482 @@ function productForm(id, cloneSourceId) {
   ensureUnitsCatalog();
   const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const uOpt = (sel) => unitList().map(u => `<option value="${esc(u.name)}" ${u.name === sel ? 'selected' : ''}>${esc(u.name)} (${esc(u.symbol)})</option>`).join('');
-  // Entrada libre de números decimales (acepta coma o punto y se puede borrar hasta el último dígito)
   const pnum = (s) => { const t = String(s == null ? '' : s).trim().replace(/,/g, '.'); if (!t) return 0; const v = parseFloat(t); return isFinite(v) ? v : 0; };
   const fmtDec = (v) => { const x = Number(v); if (!isFinite(x)) return '0'; return String(parseFloat(x.toFixed(8))); };
   const bp = invBasePres(p);
   const canon = invBaseUnit(p);
-  const isWeighed = p.weighed === true;
-  const taxSel = p.taxed === false ? 'exento' : 'grabable';
-  const gainVal = Math.min(99.99, Math.max(0, Number(p.margin != null ? p.margin : 30)));
-  const costBaseVal = (Number(p.cost) || 0) * (Number(bp.contenido) || 1);
-  const existing = (Array.isArray(p.invPres) && p.invPres.length) ? p.invPres.map((x, i) => ({ i, unidad: x.unidad, equiv: x.equiv, precio: x.precio, tipo: (x.tipo || 'MANUAL'), activa: x.activa !== false, base: !!x.base })) : [];
-  const exBase = existing.find(x => x.base);
-  const baseRow = { unidad: bp.unidad || 'Unidad', equiv: bp.contenido || 1, precio: Number(bp.precio) || 0, tipo: (exBase ? exBase.tipo : 'MANUAL'), activa: true, base: true };
-  const others = existing.filter(x => !x.base).map(x => ({ unidad: x.unidad, equiv: x.equiv, precio: x.precio, tipo: (x.tipo || 'MANUAL'), activa: x.activa !== false, base: false }));
-  let rows = [baseRow, ...others];
+  const sysRate = fmt.usdRate();
   const MAIN_CATS = ['Licores', 'Cervezas', 'Vinos', 'Destilados', 'Bebidas', 'Aguas', 'Tabacos', 'Snacks', 'Lácteos', 'Cárnicos', 'Limpieza', 'Bazar'];
   const catList = [...new Set(MAIN_CATS.concat(p.category || []).concat(db.products.map(x => x.category)).filter(Boolean))];
 
+  // State
+  const st = {
+    tab: 'general',
+    code: p.code || '', name: p.name || '', category: p.category || 'General',
+    unit: bp.unidad || 'Unidad', description: p.description || '',
+    image: p.image || '',
+    costUSD: Number(p.cost) || 0, addExpensesPct: Number(p.additionalExpensesPct) || 0,
+    lastCostUSD: Number(p.cost) || 0,
+    pricingMethod: p.pricingMethod || 'markup', marginPct: Number(p.margin != null ? p.margin : 30),
+    gapPct: Number(p.gapPct) || 10, manualPriceUSD: Number(p.manualPriceUSD) || 0,
+    ivaRate: p.ivaRate != null ? p.ivaRate : (p.taxed === false ? 0 : 0),
+    matrix: p.priceListMatrix || { publico: { marginPct: 30, active: true }, mayorista: { marginPct: 18, active: true }, distribuidor: { marginPct: 12, active: true }, especial: { marginPct: 22, active: true } },
+    stock: Number(p.stockBase) || 0, stockMin: Number(p.stockMinimo) || 0, stockMax: Number(p.stockMaximo) || 0,
+    reorderPoint: Number(p.reorderPoint) || 0, warehouse: p.warehouse || 'Principal', location: p.location || '',
+    mainPres: bp.unidad || 'Unidad', contentQty: Number(bp.contenido) || 1, baseUnit: canon || 'Unidad',
+    allowedModes: p.allowedModes || { originalPresentation: true, unit: true, fractional: false, shots: false, contentControl: false },
+    isWeighable: !!p.weighed, pricePerKg: Number(p.pricePerKg) || 0,
+    presentations: Array.isArray(p.presentations) ? JSON.parse(JSON.stringify(p.presentations)) : [],
+    suppliersInfo: Array.isArray(p.suppliersInfo) ? JSON.parse(JSON.stringify(p.suppliersInfo)) : [],
+    isComposite: !!p.isComposite, compositeComponents: Array.isArray(p.compositeComponents) ? JSON.parse(JSON.stringify(p.compositeComponents)) : []
+  };
+
+  // Pricing calculations
+  const calcRealCost = () => st.costUSD * (1 + st.addExpensesPct / 100);
+  const calcBasePrice = () => {
+    const rc = calcRealCost();
+    if (rc <= 0) return 0;
+    switch (st.pricingMethod) {
+      case 'markup': return rc * (1 + st.marginPct / 100);
+      case 'margin_on_sale': return st.marginPct >= 100 ? rc * 2 : rc / (1 - st.marginPct / 100);
+      case 'gap_system': return rc * (1 + st.marginPct / 100) * (1 + st.gapPct / 100);
+      case 'manual': return st.manualPriceUSD;
+      default: return rc * (1 + st.marginPct / 100);
+    }
+  };
+  const calcFinalPrice = () => { const bp = calcBasePrice(); return bp * (1 + st.ivaRate / 100); };
+  const calcMatrixPrice = (marginPct) => {
+    const rc = calcRealCost();
+    let base = 0;
+    switch (st.pricingMethod) {
+      case 'margin_on_sale': base = marginPct < 100 ? rc / (1 - marginPct / 100) : rc * (1 + marginPct / 100); break;
+      case 'gap_system': base = rc * (1 + marginPct / 100) * (1 + st.gapPct / 100); break;
+      default: base = rc * (1 + marginPct / 100); break;
+    }
+    return base * (1 + st.ivaRate / 100);
+  };
+
   const html = `
-    <div class="form-grid">
-      <div class="field span-2"><label>Código de barras</label><input id="pcCode" value="${esc(p.code)}" placeholder="Leer con escáner o escribir código" autofocus /></div>
-      <div class="field span-2"><label>Nombre del producto</label><input id="pcName" value="${esc(p.name)}" /></div>
-      <div class="field span-2"><label>Categoría</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input id="pcCat" value="${esc(p.category)}" placeholder="Seleccione o escriba una categoría" style="flex:1" />
-          <button type="button" id="pcCatTgl" class="btn sm" title="Mostrar categorías">＋</button>
-        </div>
-        <div id="pcCatPanel" style="display:none;margin-top:6px;flex-wrap:wrap;gap:6px">
-          ${catList.map(c => `<button type="button" class="btn sm cat-opt" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
-        </div>
-      </div>
-      <div class="field"><label>Régimen IVA</label>
-        <select id="pcTax"><option value="grabable" ${taxSel === 'grabable' ? 'selected' : ''}>Incluye IVA (gravado)</option><option value="exento" ${taxSel === 'exento' ? 'selected' : ''}>Exento de IVA</option></select>
-      </div>
-      <div class="field" style="justify-content:flex-end"><label>&nbsp;</label>
-        <label style="font-weight:500;display:flex;align-items:center;gap:6px"><input type="checkbox" id="pcWeighed" ${isWeighed ? 'checked' : ''}/> Se vende por peso variable (balanza)</label>
-      </div>
+    <div style="display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin-bottom:12px;overflow-x:auto" id="pfTabs">
+      ${['general','pricing','inventory','presentations','suppliers','composite'].map((t,i) => {
+        const labels = ['Info General','Costos & Precios','Inventario','Presentaciones','Proveedores','Combo/Kit'];
+        const icons = ['📦','💰','📦','📦','📦','📦'];
+        return `<button type="button" class="pf-tab" data-tab="${t}" style="flex:none;padding:8px 14px;font-size:12px;font-weight:600;border-bottom:2px solid transparent;cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;color:#6b7280;white-space:nowrap">${labels[i]}</button>`;
+      }).join('')}
     </div>
-    <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px;margin-bottom:12px">
-      <b style="font-size:13px;color:#1f2937">Presentación base (maestra)</b>
-      <div class="form-grid" style="margin-top:10px">
-        <div class="field"><label>Unidad (el "todo")</label><select id="pcBaseUnit">${uOpt(bp.unidad || 'Unidad')}</select></div>
-        <div class="field"><label>Contenido</label><input type="number" step="0.001" min="0.001" id="pcBaseCont" value="${Number(bp.contenido) || 1}" /></div>
-        <div class="field"><label>Unidad canónica (la contenida)</label><select id="pcCanon">${uOpt(canon)}</select></div>
-      </div>
-      <div id="pcEquiv" style="font-size:12px;color:#0c8a4a;font-weight:600;margin-top:4px"></div>
-    </div>
-    <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px;margin-bottom:12px">
-      <b style="font-size:13px;color:#1f2937">Existencia y precios</b>
-      <div class="form-grid" style="margin-top:10px">
-        <div class="field"><label>Stock (en unidad canónica)</label><input type="number" step="0.001" min="0" id="pcStock" value="${Number(p.stockBase) || 0}" /></div>
-        <div class="field"><label>Stock mínimo</label><input type="number" step="0.001" min="0" id="pcStockMin" value="${Number(p.stockMinimo) || 0}" /></div>
-        <div class="field"><label>Stock máximo</label><input type="number" step="0.001" min="0" id="pcStockMax" value="${Number(p.stockMaximo) || 0}" /></div>
-        <div class="field"><label>Costo por Unidad Base (USD)</label><input type="text" inputmode="decimal" id="pcCostBase" value="${fmtDec(costBaseVal)}" placeholder="0.00" /></div>
-        <div class="field"><label>Costo por Unidad Canónica (USD)</label><input type="text" inputmode="decimal" id="pcCost" value="${fmtDec(Number(p.cost) || 0)}" readonly style="background:#f3f4f6" /></div>
-        <div class="field"><label>% Ganancia</label><input type="number" step="0.01" min="0" max="99.99" id="pcGain" value="${gainVal}" /></div>
-        <div class="field"><label>Precio Mayorista (USD)</label><input type="text" inputmode="decimal" id="pxMayor" value="${Number(p.pxMayorista) > 0 ? fmtDec(p.pxMayorista) : ''}" placeholder="0,00" /></div>
-        <div class="field"><label>Precio Especial (USD)</label><input type="text" inputmode="decimal" id="pxEspec" value="${Number(p.pxEspecial) > 0 ? fmtDec(p.pxEspecial) : ''}" placeholder="0,00" /></div>
-        <div class="field"><label>Precio Mínimo (USD)</label><input type="text" inputmode="decimal" id="pxMin" value="${Number(p.pxMinimo) > 0 ? fmtDec(p.pxMinimo) : ''}" placeholder="0,00" /></div>
-      </div>
-      <div style="font-size:11px;color:#6b7280;margin-top:4px">El precio <b>automático</b> de una presentación = Costo × (1 + %Ganancia/100) × equivalencia. Si es <b>manual</b>, al editar el precio se recalcula el %Ganancia (máx. 99.99%).</div>
-    </div>
-    <div style="border:1px solid #e2e6ec;border-radius:8px;padding:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <b style="font-size:13px;color:#1f2937">Presentaciones / precios de venta</b>
-        <button type="button" class="btn sm primary" id="pcAdd">+ Agregar presentación</button>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px">
-        <span style="display:flex;align-items:center;justify-content:center">Unidad de venta</span><span style="display:flex;align-items:center;justify-content:center">Equivalencia</span><span style="display:flex;align-items:center;justify-content:center">Precio USD</span><span style="display:flex;align-items:center;justify-content:center">Tipo de precio</span><span style="display:flex;align-items:center;justify-content:center">Activa</span><span></span>
-      </div>
-      <div id="pcRows" style="display:flex;flex-direction:column;gap:6px"></div>
-    </div>
+    <div id="pfTabContent"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="pcSave">Guardar</button>`;
   openModal({ title: editing ? 'Editar producto' : 'Nuevo producto', body: html, footer, size: 'modal-lg' });
+
   setTimeout(() => {
-    const pcBaseUnit = $('#pcBaseUnit'), pcBaseCont = $('#pcBaseCont'), pcCanon = $('#pcCanon');
-    const pcCost = $('#pcCost'), pcCostBase = $('#pcCostBase'), pcGain = $('#pcGain');
-    const contenido = () => parseFloat(pcBaseCont.value) || 1;
-    const cost = () => parseFloat(pcCost.value) || 0;
-    // Al ingresar Costo por Unidad Base se deriva el costo de la unidad canónica = base ÷ contenido
-    const costBase = () => parseFloat(String(pcCostBase.value).replace(',', '.')) || 0;
-    const syncCanonicalCost = () => { pcCost.value = fmtDec(costBase() / contenido()); };
-    const syncBaseCost = () => { pcCostBase.value = fmtDec(cost() * contenido()); };
-    const gain = () => Math.min(99.99, Math.max(0, parseFloat(pcGain.value) || 0));
-    const setGain = (g) => { pcGain.value = (Math.min(99.99, Math.max(0, g))).toFixed(2); };
-    // Precio resuelto de la presentación base (todo)
-    const baseResolved = () => rows[0].tipo === 'AUTO' ? cost() * (1 + gain() / 100) * contenido() : pnum(rows[0].precio);
-    const rowAuto = (equiv) => (baseResolved() / contenido()) * equiv;
-
-    const showEquiv = () => { $('#pcEquiv').textContent = '1 ' + (pcBaseUnit.value || '?') + ' = ' + contenido() + ' ' + (pcCanon.value || '?'); };
-
-    const paintRows = () => {
-      const box = $('#pcRows'); if (!box) return; box.innerHTML = '';
-      rows.forEach((r, idx) => {
-        const isBase = idx === 0;
-        const auto = r.tipo === 'AUTO';
-        const unVal = isBase ? (pcBaseUnit.value || 'Unidad') : r.unidad;
-        const eqVal = isBase ? contenido() : pnum(r.equiv);
-        const priceVal = isBase ? (auto ? baseResolved() : pnum(r.precio)) : (auto ? rowAuto(eqVal) : pnum(r.precio));
-        const div = document.createElement('div');
-        div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 120px 1fr 150px 40px;gap:6px;align-items:center';
-        div.innerHTML = `
-          <select class="pr-un" data-i="${idx}" ${isBase ? 'disabled' : ''}>${uOpt(unVal)}</select>
-          <input type="text" inputmode="decimal" class="pr-eq" value="${fmtDec(eqVal)}" data-i="${idx}" placeholder="0.00" ${isBase ? 'disabled' : ''} />
-          <input type="text" inputmode="decimal" class="pr-pr" value="${fmtDec(priceVal)}" data-i="${idx}" placeholder="0.000000" ${auto ? 'readonly style="background:#f3f4f6"' : ''}/>
-          <select class="pr-tp" data-i="${idx}"><option value="MANUAL" ${!auto ? 'selected' : ''}>Manual</option><option value="AUTO" ${auto ? 'selected' : ''}>Automático</option></select>
-          <label style="font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px${isBase ? ';opacity:.6' : ''}"><input type="checkbox" class="pr-act" data-i="${idx}" ${r.activa ? 'checked' : ''} ${isBase ? 'disabled' : ''}/> Activa</label>
-          <button type="button" class="btn sm danger pr-del" data-i="${idx}" title="Quitar" ${isBase ? 'disabled style="visibility:hidden"' : ''}>&times;</button>`;
-        box.appendChild(div);
+    // Tab switching
+    const switchTab = (tab) => {
+      st.tab = tab;
+      document.querySelectorAll('.pf-tab').forEach(b => {
+        b.style.borderBottomColor = b.dataset.tab === tab ? '#4f46e5' : 'transparent';
+        b.style.color = b.dataset.tab === tab ? '#4f46e5' : '#6b7280';
       });
-      box.querySelectorAll('.pr-un').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; r.unidad = el.value; }));
-      box.querySelectorAll('.pr-eq').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; r.equiv = pnum(el.value); if (r.tipo === 'AUTO') { const pIn = el.closest('div').querySelector('.pr-pr'); pIn.value = fmtDec(rowAuto(r.equiv)); } }));
-      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('input', () => { const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return; r.precio = pnum(el.value); }));
-      box.querySelectorAll('.pr-pr').forEach(el => el.addEventListener('change', () => {
-        const r = rows[+el.dataset.i]; if (r.tipo === 'AUTO') return;
-        r.precio = pnum(el.value);
-        // Solo la presentación base recalcula el % de Ganancia; las fraccionadas manuales son independientes
-        if (r.base) {
-          const c = cost(); if (c > 0) { const eqIn = el.closest('div').querySelector('.pr-eq'); const e = eqIn ? (pnum(eqIn.value) || 1) : contenido(); setGain((((r.precio / e) - c) / c) * 100); paintRows(); }
-        }
-      }));
-      box.querySelectorAll('.pr-tp').forEach(el => el.addEventListener('change', () => {
-        const r = rows[+el.dataset.i]; r.tipo = el.value;
-        const rowDiv = el.closest('div'); const pIn = rowDiv.querySelector('.pr-pr'); const eq = rowDiv.querySelector('.pr-eq');
-        const eqv = isBase0(el) ? contenido() : pnum(eq.value);
-        if (r.tipo === 'AUTO') { pIn.readOnly = true; pIn.style.background = '#f3f4f6'; pIn.value = fmtDec(isBase0(el) ? baseResolved() : rowAuto(eqv)); }
-        else { pIn.readOnly = false; pIn.style.background = ''; pIn.value = fmtDec(r.precio); }
-      }));
-      box.querySelectorAll('.pr-act').forEach(el => el.addEventListener('change', () => { const r = rows[+el.dataset.i]; if (!r.base) r.activa = el.checked; }));
-      box.querySelectorAll('.pr-del').forEach(el => el.addEventListener('click', () => { if (rows[+el.dataset.i].base) return; rows.splice(+el.dataset.i, 1); paintRows(); }));
-      // garantizar que los selects/inputs se vean a ancho completo y alineados
-      box.querySelectorAll('select, input').forEach(el => { if (el.style.width !== '100%') { el.style.width = '100%'; el.style.boxSizing = 'border-box'; } });
+      renderTabContent();
     };
-    const containedFor = () => contenido();
-    const isBase0 = (el) => rows[+el.dataset.i].base;
+    document.querySelectorAll('.pf-tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
-    const repaintAll = () => { paintRows(); showEquiv(); };
-    // Desplegable de categorías (+ / −)
-    const catTgl = $('#pcCatTgl'), catPanel = $('#pcCatPanel');
-    let catOpen = false;
-    catTgl.addEventListener('click', () => { catOpen = !catOpen; catPanel.style.display = catOpen ? 'flex' : 'none'; catTgl.textContent = catOpen ? '−' : '＋'; });
-    catPanel.querySelectorAll('.cat-opt').forEach(b => b.addEventListener('click', () => { $('#pcCat').value = b.dataset.cat; catOpen = false; catPanel.style.display = 'none'; catTgl.textContent = '＋'; }));
-    $('#pcAdd').addEventListener('click', () => { rows.push({ unidad: pcCanon.value || 'Unidad', equiv: 1, precio: 0, tipo: 'AUTO', activa: true, base: false }); paintRows(); });
-    [pcBaseUnit, pcCanon].forEach(el => el.addEventListener('change', repaintAll));
-    pcBaseCont.addEventListener('input', () => { syncCanonicalCost(); repaintAll(); });
-    pcCostBase.addEventListener('input', () => { syncCanonicalCost(); repaintAll(); });
-    pcCost.addEventListener('input', () => { syncBaseCost(); repaintAll(); });
-    pcGain.addEventListener('input', repaintAll);
-    paintRows(); showEquiv();
+    const renderTabContent = () => {
+      const box = $('#pfTabContent');
+      if (!box) return;
+      if (st.tab === 'general') renderTabGeneral(box);
+      else if (st.tab === 'pricing') renderTabPricing(box);
+      else if (st.tab === 'inventory') renderTabInventory(box);
+      else if (st.tab === 'presentations') renderTabPresentations(box);
+      else if (st.tab === 'suppliers') renderTabSuppliers(box);
+      else if (st.tab === 'composite') renderTabComposite(box);
+    };
 
+    // === TAB 1: GENERAL ===
+    const renderTabGeneral = (box) => {
+      box.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 200px;gap:14px">
+          <div>
+            <div class="form-grid">
+              <div class="field span-2"><label>Código / SKU / Barra *</label><input id="pcCode" value="${esc(st.code)}" placeholder="SKU-100234" /></div>
+              <div class="field span-2"><label>Nombre Comercial *</label><input id="pcName" value="${esc(st.name)}" /></div>
+              <div class="field"><label>Categoría *</label>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <input id="pcCat" value="${esc(st.category)}" style="flex:1" />
+                  <button type="button" id="pcCatTgl" class="btn sm">＋</button>
+                </div>
+                <div id="pcCatPanel" style="display:none;margin-top:6px;flex-wrap:wrap;gap:6px">
+                  ${catList.map(c => `<button type="button" class="btn sm cat-opt" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+                </div>
+              </div>
+              <div class="field"><label>Unidad de Medida Base *</label><select id="pcUnit">${uOpt(st.unit)}</select></div>
+            </div>
+            <div style="margin-top:8px"><label style="font-size:12px;font-weight:600;color:#374151">Descripción / Ficha Técnica</label>
+              <textarea id="pcDesc" rows="3" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:8px;font-size:12px" placeholder="Detalles, presentación, fabricante...">${esc(st.description)}</textarea>
+            </div>
+          </div>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px">
+            <label style="font-size:12px;font-weight:700;display:block;margin-bottom:8px">📷 Imagen</label>
+            <div id="pcImgPreview" style="aspect-ratio:4/3;border-radius:8px;overflow:hidden;background:#fff;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;margin-bottom:8px">
+              ${st.image ? `<img src="${esc(st.image)}" style="width:100%;height:100%;object-fit:cover"/>` : '<span style="color:#9ca3af;font-size:11px">Sin imagen</span>'}
+            </div>
+            <input type="file" id="pcFile" accept="image/*" style="display:none" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+              <button type="button" class="btn sm" id="pcUploadBtn">📎 Archivo</button>
+              <button type="button" class="btn sm" id="pcCameraBtn" style="background:#eef2ff;color:#4f46e5">📷 Cámara</button>
+            </div>
+            <video id="pcCamVideo" style="display:none;width:100%;border-radius:8px" autoplay playsinline></video>
+            <div id="pcCamControls" style="display:none;margin-top:6px">
+              <button type="button" class="btn sm primary" id="pcCaptureBtn" style="width:100%">📸 Capturar</button>
+            </div>
+            <canvas id="pcCamCanvas" style="display:none"></canvas>
+            <input type="url" id="pcImgUrl" value="${esc(st.image)}" placeholder="URL imagen https://..." style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:10px;font-family:monospace;margin-top:6px" />
+          </div>
+        </div>`;
+      // Events
+      const catTgl = $('#pcCatTgl'), catPanel = $('#pcCatPanel');
+      let catOpen = false;
+      catTgl.addEventListener('click', () => { catOpen = !catOpen; catPanel.style.display = catOpen ? 'flex' : 'none'; catTgl.textContent = catOpen ? '−' : '＋'; });
+      catPanel.querySelectorAll('.cat-opt').forEach(b => b.addEventListener('click', () => { $('#pcCat').value = b.dataset.cat; catOpen = false; catPanel.style.display = 'none'; catTgl.textContent = '＋'; }));
+      $('#pcUploadBtn').addEventListener('click', () => $('#pcFile').click());
+      $('#pcFile').addEventListener('change', (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => { st.image = ev.target.result; $('#pcImgPreview').innerHTML = `<img src="${st.image}" style="width:100%;height:100%;object-fit:cover"/>`; };
+        reader.readAsDataURL(file);
+      });
+      let camStream = null;
+      $('#pcCameraBtn').addEventListener('click', async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } });
+          camStream = stream;
+          const vid = $('#pcCamVideo'); vid.srcObject = stream; vid.style.display = 'block';
+          $('#pcCamControls').style.display = 'block';
+        } catch (e) { toast('No se pudo acceder a la cámara: ' + e.message, 'warn'); }
+      });
+      $('#pcCaptureBtn')?.addEventListener('click', () => {
+        const vid = $('#pcCamVideo'), canvas = $('#pcCamCanvas');
+        canvas.width = vid.videoWidth || 640; canvas.height = vid.videoHeight || 480;
+        canvas.getContext('2d').drawImage(vid, 0, 0);
+        st.image = canvas.toDataURL('image/jpeg', 0.85);
+        $('#pcImgPreview').innerHTML = `<img src="${st.image}" style="width:100%;height:100%;object-fit:cover"/>`;
+        if (camStream) camStream.getTracks().forEach(t => t.stop());
+        vid.style.display = 'none'; $('#pcCamControls').style.display = 'none';
+      });
+      $('#pcImgUrl').addEventListener('change', (e) => { st.image = e.target.value; $('#pcImgPreview').innerHTML = st.image ? `<img src="${esc(st.image)}" style="width:100%;height:100%;object-fit:cover"/>` : '<span style="color:#9ca3af">Sin imagen</span>'; });
+    };
+
+    // === TAB 2: COSTS & PRICING ===
+    const renderTabPricing = (box) => {
+      const rc = calcRealCost(), bp = calcBasePrice(), fp = calcFinalPrice();
+      const grossProfit = Math.max(0, bp - rc);
+      const effProfit = rc > 0 ? ((bp - rc) / rc * 100) : 0;
+      box.innerHTML = `
+        <div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:12px">
+          <b style="font-size:12px">1. Estructura de Costos</b>
+          <div style="font-size:10px;color:#6b7280;margin-bottom:6px">Fórmula: Costo Real = Costo × (1 + Gastos%)</div>
+          <div class="form-grid">
+            <div class="field"><label>Costo de Compra (USD) *</label><input id="pcCost" type="text" inputmode="decimal" value="${fmtDec(st.costUSD)}" /></div>
+            <div class="field"><label>Gastos Adicionales (%)</label><input id="pcAddExp" type="text" inputmode="decimal" value="${fmtDec(st.addExpensesPct)}" /></div>
+            <div class="field" style="background:#eef2ff;border-radius:8px;padding:8px"><label style="color:#4f46e5">Costo Real Calculado</label><div style="font-size:16px;font-weight:800;color:#312e81">$${fmtDec(rc)}</div></div>
+            <div class="field"><label>Último Costo (Auditoría)</label><input id="pcLastCost" type="text" inputmode="decimal" value="${fmtDec(st.lastCostUSD)}" /></div>
+          </div>
+        </div>
+        <div style="padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:12px">
+          <b style="font-size:12px">2. Método de Formación de Precio</b>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0">
+            ${[
+              { id:'markup', title:'Markup', formula:'Costo × (1+Margen%)' },
+              { id:'margin_on_sale', title:'Margen Venta', formula:'Costo / (1-Margen%)' },
+              { id:'gap_system', title:'Brecha', formula:'Costo × (1+Margen%) × (1+Brecha%)' },
+              { id:'manual', title:'Manual', formula:'Precio fijo directo' }
+            ].map(m => `<button type="button" class="btn sm pm-btn ${st.pricingMethod===m.id?'primary':''}" data-pm="${m.id}" style="text-align:left;padding:8px;font-size:11px"><b>${m.title}</b><br/><span style="font-size:10px;color:#6b7280;font-family:monospace">${m.formula}</span></button>`).join('')}
+          </div>
+          <div class="form-grid" style="margin-top:6px">
+            ${st.pricingMethod !== 'manual' ? `<div class="field"><label>Margen de Ganancia (%)</label><input id="pcMargin" type="text" inputmode="decimal" value="${fmtDec(st.marginPct)}" /></div>` : ''}
+            ${st.pricingMethod === 'gap_system' ? `<div class="field"><label>Brecha (%)</label><input id="pcGap" type="text" inputmode="decimal" value="${fmtDec(st.gapPct)}" /></div>` : ''}
+            ${st.pricingMethod === 'manual' ? `<div class="field"><label>Precio Base Manual (USD)</label><input id="pcManualPrice" type="text" inputmode="decimal" value="${fmtDec(st.manualPriceUSD)}" /></div>` : ''}
+            <div class="field" style="background:#f0fdf4;border-radius:8px;padding:8px"><label style="color:#15803d">Base Sin IVA</label><div style="font-size:14px;font-weight:800;color:#14532d">$${fmtDec(bp)}</div></div>
+          </div>
+        </div>
+        <div style="padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin-bottom:12px">
+          <b style="font-size:12px">3. Parámetro Fiscal (IVA)</b>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px">
+            ${[{rate:16,label:'16% General'},{rate:8,label:'8% Reducida'},{rate:0,label:'0% Exento'}].map(t => `<button type="button" class="btn sm iva-btn ${st.ivaRate===t.rate?'primary':''}" data-iva="${t.rate}">${t.label}</button>`).join('')}
+          </div>
+        </div>
+        <div style="padding:10px;background:linear-gradient(135deg,#1e1b4b,#312e81);border-radius:12px;color:#fff;margin-bottom:12px">
+          <b style="font-size:12px">Panel de Resultados en Vivo</b>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:8px">
+            <div style="background:rgba(255,255,255,0.1);padding:8px;border-radius:8px"><span style="font-size:10px;color:#c7d2fe">Costo Real</span><div style="font-weight:800">$${fmtDec(rc)}</div><div style="font-size:10px;color:#a5b4fc">Bs. ${fmt.esp(rc * sysRate)}</div></div>
+            <div style="background:rgba(255,255,255,0.1);padding:8px;border-radius:8px"><span style="font-size:10px;color:#86efac">Ganancia (${fmtDec(effProfit)}%)</span><div style="font-weight:800;color:#4ade80">+$${fmtDec(grossProfit)}</div><div style="font-size:10px;color:#86efac">Bs. ${fmt.esp(grossProfit * sysRate)}</div></div>
+            <div style="background:rgba(255,255,255,0.1);padding:8px;border-radius:8px"><span style="font-size:10px;color:#c7d2fe">Base Sin IVA</span><div style="font-weight:800">$${fmtDec(bp)}</div></div>
+            <div style="background:rgba(74,222,128,0.2);padding:8px;border-radius:8px;border:1px solid rgba(74,222,128,0.4)"><span style="font-size:10px;color:#86efac;font-weight:700">PVP Final USD</span><div style="font-weight:800;font-size:16px;color:#4ade80">$${fmtDec(fp)}</div><div style="font-size:10px;color:#86efac">${st.ivaRate>0?'IVA '+st.ivaRate+'%':'Exento'}</div></div>
+            <div style="background:rgba(251,191,36,0.2);padding:8px;border-radius:8px;border:1px solid rgba(251,191,36,0.4)"><span style="font-size:10px;color:#fcd34d;font-weight:700">PVP Final Bs.</span><div style="font-weight:800;font-size:16px;color:#fcd34d">Bs. ${fmt.esp(fp * sysRate)}</div><div style="font-size:10px;color:#fcd34d">Tasa ${fmt.num(sysRate)}</div></div>
+          </div>
+        </div>
+        <div style="padding:10px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px">
+          <b style="font-size:12px">4. Matriz de Listas de Precios</b>
+          <table class="dt" style="margin-top:6px">
+            <thead><tr><th>Lista</th><th>Margen %</th><th style="text-align:right">Precio USD</th><th style="text-align:right">Precio Bs.</th><th>Activa</th></tr></thead>
+            <tbody>
+              ${['publico','mayorista','distribuidor','especial'].map(k => {
+                const labels = {publico:'Público / Detal',mayorista:'Mayorista',distribuidor:'Distribuidor',especial:'Especial / VIP'};
+                const colors = {publico:'#10b981',mayorista:'#3b82f6',distribuidor:'#a855f7',especial:'#f59e0b'};
+                const mPct = st.matrix[k]?.marginPct || 0;
+                const mPrice = calcMatrixPrice(mPct);
+                const active = st.matrix[k]?.active !== false;
+                return `<tr><td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${colors[k]}"></span><b>${labels[k]}</b></span></td>
+                  <td><input type="text" inputmode="decimal" class="matrix-margin" data-mk="${k}" value="${fmtDec(mPct)}" style="width:70px;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;font-family:monospace" />%</td>
+                  <td style="text-align:right;font-weight:700;color:${colors[k]}">$${fmtDec(mPrice)}</td>
+                  <td style="text-align:right;font-weight:600">Bs. ${fmt.esp(mPrice * sysRate)}</td>
+                  <td><input type="checkbox" class="matrix-active" data-mk="${k}" ${active?'checked':''} /></td></tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      // Events
+      box.querySelectorAll('.pm-btn').forEach(b => b.addEventListener('click', () => { st.pricingMethod = b.dataset.pm; renderTabPricing(box); }));
+      box.querySelectorAll('.iva-btn').forEach(b => b.addEventListener('click', () => { st.ivaRate = Number(b.dataset.iva); renderTabPricing(box); }));
+      const bind = (id, key, num) => { const el = box.querySelector(id); if (el) el.addEventListener('input', (e) => { st[key] = num ? pnum(e.target.value) : e.target.value; }); };
+      bind('#pcCost','costUSD',true); bind('#pcAddExp','addExpensesPct',true); bind('#pcLastCost','lastCostUSD',true);
+      bind('#pcMargin','marginPct',true); bind('#pcGap','gapPct',true); bind('#pcManualPrice','manualPriceUSD',true);
+      box.querySelectorAll('.matrix-margin').forEach(el => el.addEventListener('input', (e) => { const k = el.dataset.mk; if (!st.matrix[k]) st.matrix[k] = {}; st.matrix[k].marginPct = pnum(e.target.value); renderTabPricing(box); }));
+      box.querySelectorAll('.matrix-active').forEach(el => el.addEventListener('change', (e) => { const k = el.dataset.mk; if (!st.matrix[k]) st.matrix[k] = {}; st.matrix[k].active = e.target.checked; }));
+    };
+
+    // === TAB 3: INVENTORY ===
+    const renderTabInventory = (box) => {
+      box.innerHTML = `
+        <div style="padding:10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;margin-bottom:12px;font-size:12px;color:#312e81">
+          <b>Control Físico y Parámetros de Almacenamiento</b>
+          <div style="font-size:11px;color:#4338ca;margin-top:2px">Niveles de seguridad, puntos de reorden y ubicación en estantería.</div>
+        </div>
+        <div class="form-grid" style="margin-bottom:12px">
+          <div class="field"><label>Stock Inicial</label><input id="pcStockInit" type="number" step="0.001" min="0" value="${st.stock}" /></div>
+          <div class="field"><label>Stock Actual Disponible *</label><input id="pcStock" type="number" step="0.001" min="0" value="${st.stock}" /></div>
+          <div class="field"><label>Stock Mínimo (Alerta)</label><input id="pcStockMin" type="number" step="0.001" min="0" value="${st.stockMin}" /></div>
+          <div class="field"><label>Stock Máximo (Tope)</label><input id="pcStockMax" type="number" step="0.001" min="0" value="${st.stockMax}" /></div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label>Punto de Reorden</label><input id="pcReorder" type="number" step="1" min="0" value="${st.reorderPoint}" /></div>
+          <div class="field"><label>Almacén Asignado</label>
+            <select id="pcWarehouse">
+              ${['Principal','Secundario','Depósito','Piso de Venta'].map(w => `<option value="${w}" ${st.warehouse===w?'selected':''}>${w}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field span-2"><label>Ubicación Física (Pasillo/Estante)</label><input id="pcLocation" value="${esc(st.location)}" placeholder="Pasillo 3 - Estante B" /></div>
+        </div>`;
+      const bind = (id, key) => { const el = box.querySelector(id); if (el) el.addEventListener('input', (e) => { st[key] = e.target.type === 'number' ? pnum(e.target.value) : e.target.value; }); };
+      bind('#pcStockInit','stock'); bind('#pcStock','stock'); bind('#pcStockMin','stockMin'); bind('#pcStockMax','stockMax');
+      bind('#pcReorder','reorderPoint'); bind('#pcLocation','location');
+      const wh = box.querySelector('#pcWarehouse'); if (wh) wh.addEventListener('change', (e) => { st.warehouse = e.target.value; });
+    };
+
+    // === TAB 4: PRESENTATIONS ===
+    const renderTabPresentations = (box) => {
+      box.innerHTML = `
+        <div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:12px">
+          <b style="font-size:12px">Presentación Principal y Conversión</b>
+          <div class="form-grid" style="margin-top:6px">
+            <div class="field"><label>Presentación Principal</label>
+              <select id="pcMainPres">${['Unidad','Caja','Paquete','Botella','Litro','Kg','Metro','Bulto','Display'].map(u => `<option value="${u}" ${st.mainPres===u?'selected':''}>${u}</option>`).join('')}</select>
+            </div>
+            <div class="field"><label>Contenido Unitario</label><input id="pcContentQty" type="number" step="0.001" min="0.001" value="${st.contentQty}" /></div>
+            <div class="field"><label>Unidad Base</label><input id="pcBaseUnit" value="${esc(st.baseUnit)}" /></div>
+          </div>
+          <div style="font-size:11px;color:#059669;font-weight:600;margin-top:4px" id="pcEquiv">1 ${st.mainPres} = ${st.contentQty} ${st.baseUnit}</div>
+        </div>
+        <div style="padding:10px;background:#fef3c7;border:1px solid #fde68a;border-radius:12px;margin-bottom:12px">
+          <b style="font-size:12px">Modalidades de Venta Permitidas</b>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px">
+            ${[
+              {key:'originalPresentation',label:'Presentación Original',desc:'Empaque cerrado completo'},
+              {key:'unit',label:'Venta por Unidad',desc:'Unidades sueltas'},
+              {key:'fractional',label:'Fraccionada (Bs)',desc:'Monto libre en Bs.'},
+              {key:'shots',label:'Tragos / Shots',desc:'Licorería, copas'},
+              {key:'contentControl',label:'Balanza / Peso',desc:'Control por Kg'}
+            ].map(m => `<label style="padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:11px;display:flex;align-items:start;gap:6px">
+              <input type="checkbox" class="mode-check" data-mode="${m.key}" ${st.allowedModes[m.key]?'checked':''} style="margin-top:2px" />
+              <div><b>${m.label}</b><div style="font-size:10px;color:#6b7280">${m.desc}</div></div>
+            </label>`).join('')}
+          </div>
+        </div>
+        <div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <b style="font-size:12px">Presentaciones Adicionales (${st.presentations.length})</b>
+          </div>
+          <div class="form-grid" style="margin-bottom:8px">
+            <div class="field"><label>Nombre</label><input id="pcPresName" placeholder="Caja x 12" /></div>
+            <div class="field"><label>Factor (unidades)</label><input id="pcPresFactor" type="number" min="1" value="12" /></div>
+            <div class="field"><label>Precio (USD)</label><input id="pcPresPrice" type="text" inputmode="decimal" placeholder="Auto" /></div>
+            <div class="field"><label>Código Barras</label><input id="pcPresBarcode" placeholder="759..." /></div>
+          </div>
+          <button type="button" class="btn sm primary" id="pcAddPres">+ Agregar</button>
+          <div id="pcPresList" style="margin-top:8px"></div>
+        </div>`;
+      // Paint presentations list
+      const paintPres = () => {
+        const list = $('#pcPresList'); if (!list) return;
+        if (st.presentations.length === 0) { list.innerHTML = '<div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px">Sin presentaciones adicionales</div>'; return; }
+        list.innerHTML = st.presentations.map((pr, i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:4px;font-size:11px">
+          <div><b>${esc(pr.name)}</b> · ${pr.factor} unid. · <span style="color:#059669;font-weight:700">$${fmtDec(pr.priceUSD)}</span>${pr.barcode ? ' · <span style="font-family:monospace;color:#9ca3af">'+esc(pr.barcode)+'</span>' : ''}</div>
+          <button type="button" class="btn sm danger" data-rmpres="${i}">&times;</button>
+        </div>`).join('');
+        list.querySelectorAll('[data-rmpres]').forEach(b => b.addEventListener('click', () => { st.presentations.splice(+b.dataset.rmpres, 1); paintPres(); }));
+      };
+      paintPres();
+      // Events
+      box.querySelectorAll('.mode-check').forEach(el => el.addEventListener('change', (e) => { st.allowedModes[el.dataset.mode] = e.target.checked; }));
+      const bind = (id, key, num) => { const el = box.querySelector(id); if (el) el.addEventListener('input', (e) => { st[key] = num ? pnum(e.target.value) : e.target.value; }); };
+      bind('#pcMainPres','mainPres'); bind('#pcContentQty','contentQty',true); bind('#pcBaseUnit','baseUnit');
+      box.querySelector('#pcContentQty')?.addEventListener('input', () => { const el = $('#pcEquiv'); if (el) el.textContent = `1 ${st.mainPres} = ${st.contentQty} ${st.baseUnit}`; });
+      $('#pcAddPres').addEventListener('click', () => {
+        const name = $('#pcPresName').value.trim();
+        const factor = Math.max(1, parseInt($('#pcPresFactor').value) || 1);
+        const price = pnum($('#pcPresPrice').value) || (calcFinalPrice() * factor * 0.95);
+        if (!name) { toast('Ingrese nombre de la presentación', 'warn'); return; }
+        st.presentations.push({ id: 'pres-' + Date.now(), name, factor, priceUSD: price, barcode: $('#pcPresBarcode').value.trim() || undefined });
+        $('#pcPresName').value = ''; $('#pcPresPrice').value = ''; $('#pcPresBarcode').value = '';
+        paintPres();
+      });
+    };
+
+    // === TAB 5: SUPPLIERS ===
+    const renderTabSuppliers = (box) => {
+      const highestCost = st.suppliersInfo.length > 0 ? Math.max(...st.suppliersInfo.map(s => s.costUSD)) : null;
+      box.innerHTML = `
+        <div style="padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;margin-bottom:12px;font-size:12px;color:#1e3a5f">
+          <b>Proveedores del Producto y Regla del Costo Más Alto</b>
+          <div style="font-size:11px;margin-top:2px">El sistema tomará automáticamente el costo más alto entre proveedores.</div>
+        </div>
+        <div class="form-grid" style="margin-bottom:12px">
+          <div class="field span-2"><label>Proveedor</label>
+            <select id="pcSupSelect">${db.suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Costo Proveedor (USD)</label><input id="pcSupCost" type="text" inputmode="decimal" value="${fmtDec(highestCost || st.costUSD)}" /></div>
+          <div class="field"><label>Código Barras Proveedor</label><input id="pcSupBarcode" placeholder="759..." /></div>
+        </div>
+        <button type="button" class="btn sm primary" id="pcAddSup">+ Asociar Proveedor</button>
+        <div id="pcSupList" style="margin-top:10px"></div>`;
+      const paintSup = () => {
+        const list = $('#pcSupList'); if (!list) return;
+        if (st.suppliersInfo.length === 0) { list.innerHTML = '<div style="font-size:11px;color:#9ca3af;text-align:center;padding:16px;border:2px dashed #e5e7eb;border-radius:8px">Sin proveedores vinculados</div>'; return; }
+        const maxC = Math.max(...st.suppliersInfo.map(s => s.costUSD));
+        list.innerHTML = `<table class="dt"><thead><tr><th>Proveedor</th><th>Cód. Barras</th><th style="text-align:right">Costo USD</th><th>Estado</th><th></th></tr></thead><tbody>
+          ${st.suppliersInfo.map((s, i) => `<tr style="${s.costUSD===maxC?'background:#eff6ff':''}">
+            <td><b>${esc(s.supplierName)}</b></td>
+            <td style="font-family:monospace;font-size:11px">${esc(s.barcode||'')}</td>
+            <td style="text-align:right;font-weight:700">$${fmtDec(s.costUSD)}</td>
+            <td>${s.costUSD===maxC?'<span class="pill blue">Costo Máximo</span>':'<span style="font-size:10px;color:#9ca3af">Menor</span>'}</td>
+            <td><button type="button" class="btn sm danger" data-rmsup="${i}">&times;</button></td>
+          </tr>`).join('')}
+        </tbody></table>`;
+        list.querySelectorAll('[data-rmsup]').forEach(b => b.addEventListener('click', () => { st.suppliersInfo.splice(+b.dataset.rmsup, 1); paintSup(); }));
+      };
+      paintSup();
+      $('#pcAddSup').addEventListener('click', () => {
+        const supId = $('#pcSupSelect').value;
+        const sup = db.suppliers.find(s => s.id === +supId);
+        if (!sup) { toast('Seleccione un proveedor', 'warn'); return; }
+        const cost = pnum($('#pcSupCost').value);
+        if (cost <= 0) { toast('Ingrese un costo válido', 'warn'); return; }
+        if (st.suppliersInfo.some(s => s.supplierId === sup.id)) { toast('Este proveedor ya está vinculado', 'warn'); return; }
+        st.suppliersInfo.push({ id: 'ps-' + Date.now(), supplierId: sup.id, supplierName: sup.name, costUSD: cost, barcode: $('#pcSupBarcode').value.trim() || st.code });
+        paintSup();
+      });
+    };
+
+    // === TAB 6: COMPOSITE ===
+    const renderTabComposite = (box) => {
+      const totalCost = st.compositeComponents.reduce((s, c) => s + c.costUSD * c.quantity, 0);
+      box.innerHTML = `
+        <div style="padding:10px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;margin-bottom:12px">
+          <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="pcIsComposite" ${st.isComposite?'checked':''} />
+            Producto Compuesto (Kit / Combo)
+          </label>
+          <div style="font-size:11px;color:#6b7280;margin-top:4px">Combina productos existentes en un paquete. El stock se calcula virtualmente.</div>
+        </div>
+        <div id="pcCompositeSection" style="${st.isComposite?'':'display:none'}">
+          <div class="form-grid" style="margin-bottom:8px">
+            <div class="field span-2"><label>Producto componente</label>
+              <select id="pcCompProd">${db.products.filter(x => !editing || x.id !== id).map(x => `<option value="${x.id}">${esc(x.code)} — ${esc(x.name)}</option>`).join('')}</select>
+            </div>
+            <div class="field"><label>Cantidad</label><input id="pcCompQty" type="number" min="1" value="1" /></div>
+          </div>
+          <button type="button" class="btn sm primary" id="pcAddComp">+ Agregar Componente</button>
+          <div id="pcCompList" style="margin-top:10px"></div>
+          <div style="margin-top:8px;padding:8px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;font-size:12px">
+            <b>Costo Total Kit:</b> $${fmtDec(totalCost)} · <b>Stock Virtual:</b> ${st.compositeComponents.length > 0 ? Math.min(...st.compositeComponents.map(c => { const pr = db.products.find(x => x.id === +c.productId); return pr ? Math.floor((pr.stockBase||0) / c.quantity) : 0; })) : 0} combos
+          </div>
+        </div>`;
+      const paintComp = () => {
+        const list = $('#pcCompList'); if (!list) return;
+        if (st.compositeComponents.length === 0) { list.innerHTML = '<div style="font-size:11px;color:#9ca3af;text-align:center;padding:12px">Sin componentes</div>'; return; }
+        list.innerHTML = st.compositeComponents.map((c, i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:4px;font-size:11px">
+          <div><b>${esc(c.productName)}</b> × ${c.quantity} · <span style="color:#7c3aed;font-weight:700">$${fmtDec(c.costUSD * c.quantity)}</span></div>
+          <button type="button" class="btn sm danger" data-rmcomp="${i}">&times;</button>
+        </div>`).join('');
+        list.querySelectorAll('[data-rmcomp]').forEach(b => b.addEventListener('click', () => { st.compositeComponents.splice(+b.dataset.rmcomp, 1); paintComp(); }));
+      };
+      paintComp();
+      $('#pcIsComposite').addEventListener('change', (e) => { st.isComposite = e.target.checked; $('#pcCompositeSection').style.display = e.target.checked ? '' : 'none'; });
+      $('#pcAddComp').addEventListener('click', () => {
+        const prodId = $('#pcCompProd').value;
+        const prod = db.products.find(x => x.id === +prodId);
+        if (!prod) return;
+        if (st.compositeComponents.some(c => c.productId === prod.id)) { toast('Este componente ya está incluido', 'warn'); return; }
+        const qty = Math.max(1, parseInt($('#pcCompQty').value) || 1);
+        st.compositeComponents.push({ productId: prod.id, productName: prod.name, quantity: qty, costUSD: Number(prod.cost) || 0 });
+        paintComp();
+      });
+    };
+
+    // Initial render
+    switchTab('general');
+
+    // Save handler
     $('#pcSave').addEventListener('click', () => {
-      const code = $('#pcCode').value.trim();
-      const name = $('#pcName').value.trim();
-      if (!name) { toast('Ingrese el nombre del producto', 'warn'); return; }
-      if (demoProductLimit()) { demoBlock('Version Demo: ha alcanzado el limite de ' + DEMO_MAX_PRODUCTS + ' productos. Adquiera la version completa para seguir creando productos.'); return; }
-      const cnt = contenido();
-      const unidadBase = pcBaseUnit.value || pcCanon.value || 'Unidad';
-      const canonU = pcCanon.value || 'Unidad';
-      const baseRes = baseResolved();
-      const invPres = rows.map((r, i) => {
-        const isB = i === 0;
-        const eq = isB ? cnt : pnum(r.equiv);
-        const unidad = isB ? unidadBase : r.unidad;
-        const precio = r.tipo === 'AUTO' ? (isB ? baseRes : rowAuto(eq)) : pnum(r.precio);
-        return { unidad, equiv: eq, precio, tipo: r.tipo, activa: r.activa !== false, base: isB };
-      }).filter(r => r.equiv > 0 && r.unidad);
+      if (!st.name.trim()) { toast('Ingrese el nombre del producto', 'warn'); return; }
+      if (demoProductLimit()) { demoBlock('Límite de productos alcanzado'); return; }
+      const rc = calcRealCost(), finalPrice = calcFinalPrice();
       const prod = {
-        id: editing ? source.id : (Date.now()),
-        code: code || ('P' + Date.now()),
-        name, category: $('#pcCat').value.trim() || 'General',
-        taxed: $('#pcTax').value === 'grabable',
-        weighed: $('#pcWeighed').checked,
-        invBasePres: { unidad: unidadBase, contenido: cnt, precio: baseRes },
-        invBaseUnit: canonU,
-        invPres,
-        stockBase: parseFloat($('#pcStock').value) || 0,
-        stockMinimo: parseFloat($('#pcStockMin').value) || 0,
-        stockMaximo: parseFloat($('#pcStockMax').value) || 0,
-        cost: cost(),
-        margin: gain(),
-        pxMayorista: pnum($('#pxMayor').value),
-        pxEspecial: pnum($('#pxEspec').value),
-        pxMinimo: pnum($('#pxMin').value),
+        id: editing ? source.id : Date.now(),
+        code: st.code.trim() || ('P' + Date.now()),
+        name: st.name.trim(),
+        category: st.category.trim() || 'General',
+        description: st.description.trim(),
+        unit: st.unit,
+        image: st.image,
+        taxed: st.ivaRate > 0,
+        weighed: st.allowedModes.contentControl,
+        invBasePres: { unidad: st.mainPres, contenido: st.contentQty, precio: finalPrice },
+        invBaseUnit: st.baseUnit,
+        invPres: st.presentations.map(pr => ({ unidad: pr.name, equiv: pr.factor, precio: pr.priceUSD, tipo: 'MANUAL', activa: true, base: false })).concat([{ unidad: st.mainPres, equiv: st.contentQty, precio: finalPrice, tipo: 'MANUAL', activa: true, base: true }]),
+        stockBase: st.stock,
+        stockMinimo: st.stockMin,
+        stockMaximo: st.stockMax,
+        cost: rc,
+        margin: st.marginPct,
+        pricingMethod: st.pricingMethod,
+        gapPct: st.gapPct,
+        manualPriceUSD: st.manualPriceUSD,
+        ivaRate: st.ivaRate,
+        additionalExpensesPct: st.addExpensesPct,
+        lastCostUSD: st.lastCostUSD,
+        priceListMatrix: st.matrix,
+        reorderPoint: st.reorderPoint,
+        warehouse: st.warehouse,
+        location: st.location,
+        allowedModes: st.allowedModes,
+        pricePerKg: st.isWeighable ? st.pricePerKg : 0,
+        presentations: st.presentations,
+        suppliersInfo: st.suppliersInfo,
+        highestSupplierCost: st.suppliersInfo.length > 0 ? Math.max(...st.suppliersInfo.map(s => s.costUSD)) : undefined,
+        isComposite: st.isComposite,
+        compositeComponents: st.isComposite ? st.compositeComponents : undefined,
         variantGroup: p.variantGroup
       };
       canonicalizeProduct(prod);
