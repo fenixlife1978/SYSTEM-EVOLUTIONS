@@ -869,30 +869,90 @@ function posCollect() {
   const c = ticket.customer;
   const bal = Number(c?.balance) || 0;
   if (bal <= 0) { toast('El cliente no posee saldo pendiente', 'info'); return; }
+  // Facturas pendientes del cliente, ordenadas por fecha (más antigua primero)
+  const invoices = db.receivables
+    .filter(r => r.client === c.name && r.status !== 'paid')
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const hasInvoices = invoices.length > 0;
   const html = `
     <div class="field"><label>Cliente</label><input value="${c.name}" disabled style="background:#f3f4f6" /></div>
     <div class="field"><label>Saldo pendiente</label><input value="${fmt.money(bal)}" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
+    ${hasInvoices ? `
+    <div style="margin:8px 0;padding:8px;background:#f0f4ff;border-radius:8px;font-size:11px"><b>Facturas asociadas</b> (hacé clic para ver detalle)</div>
+    <div style="max-height:180px;overflow-y:auto;margin-bottom:8px">
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead><tr style="background:#e5e7eb"><th style="text-align:left;padding:4px">Fecha</th><th style="text-align:left;padding:4px">Documento</th><th style="text-align:right;padding:4px">Total</th><th style="text-align:right;padding:4px">Pagado</th><th style="text-align:right;padding:4px">Saldo</th><th style="padding:4px"></th></tr></thead>
+        <tbody>${invoices.map(inv => {
+          const hasSale = db.sales.some(s => s.number === inv.docNumber);
+          return `<tr style="cursor:pointer;border-bottom:1px solid #e5e7eb" data-invdoc="${esc(inv.docNumber)}" data-hassale="${hasSale ? '1' : '0'}">
+            <td style="padding:4px">${fmt.date(inv.date)}</td>
+            <td style="padding:4px"><code>${inv.docNumber}</code></td>
+            <td style="padding:4px;text-align:right">${fmt.money(inv.total)}</td>
+            <td style="padding:4px;text-align:right">${fmt.money(inv.paid)}</td>
+            <td style="padding:4px;text-align:right;font-weight:700">${fmt.money(inv.balance)}</td>
+            <td style="padding:4px;text-align:center">${hasSale ? '<span style="color:#2563eb;cursor:pointer" title="Ver detalle">🔍</span>' : ''}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>` : '<div style="margin:8px 0;color:#6b7280;font-size:12px">Sin facturas individuales registradas</div>'}
     <div class="field"><label>Monto a cobrar</label><input type="number" step="0.01" min="0" id="pcAmt" value="${bal.toFixed(2)}" /></div>
     <div class="field"><label>Método de pago</label>
       <select id="pcForm">${PAY_METHODS.map(m => `<option value="${m.k}">${m.lbl}</option>`).join('')}</select>
     </div>
+    <div id="pcPreview" style="margin-top:8px;padding:8px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:11px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="pcOk">${ico('cxc')} Registrar cobro</button>`;
   openModal({ title: 'Cobranza — ' + c.name, body: html, footer });
+
+  const previewLiquidacion = () => {
+    const amt = parseFloat($('#pcAmt')?.value) || 0;
+    const el = $('#pcPreview');
+    if (!el || !hasInvoices) return;
+    if (amt <= 0) { el.innerHTML = ''; return; }
+    let restante = amt;
+    const lineas = [];
+    for (const inv of invoices) {
+      if (restante <= 0) break;
+      const abono = Math.min(restante, inv.balance);
+      const nuevoSaldo = inv.balance - abono;
+      lineas.push({ doc: inv.docNumber, abono, nuevoSaldo, liquidada: nuevoSaldo <= 0.004 });
+      restante -= abono;
+    }
+    el.innerHTML = `<b>Liquidación (más antigua → más reciente):</b>
+      ${lineas.map(l => `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #e5e7eb">
+        <span>${l.doc}</span><span>${l.liquidada ? '<span style="color:#16a34a">Liquidada</span>' : `Abono ${fmt.money(l.abono)}`}</span>
+        ${!l.liquidada ? `<span>Saldo: ${fmt.money(l.nuevoSaldo)}</span>` : ''}
+      </div>`).join('')}
+      ${restante > 0.004 ? `<div style="margin-top:4px;color:#16a34a"><b>Sobrante:</b> ${fmt.money(restante)}</div>` : ''}`;
+  };
+
   setTimeout(() => {
     const inp = $('#pcAmt'); inp.focus();
+    inp.addEventListener('input', previewLiquidacion);
+    previewLiquidacion();
+    // Clic en factura → ver detalle de venta
+    $$('tr[data-invdoc]', document).forEach(row => row.addEventListener('click', () => {
+      if (row.dataset.hassale !== '1') return;
+      const docNum = row.dataset.invdoc;
+      const sale = db.sales.find(s => s.number === docNum);
+      if (sale) posLastDetail(sale.id);
+      else toast('Venta no encontrada', 'warn');
+    }));
     $('#pcOk').addEventListener('click', () => {
       const amt = parseFloat(inp.value) || 0;
       if (amt <= 0 || amt > bal + 0.0001) { toast('Monto inválido', 'error'); return; }
       const met = $('#pcForm').value;
       c.balance = Math.max(0, bal - amt);
-      // Actualizar una CxC abierta del cliente si existe
-      const rec = db.receivables.find(r => r.client === c.name && r.status !== 'paid');
-      if (rec) {
-        rec.paid += amt;
-        rec.balance = Math.max(0, rec.total - rec.paid);
-        rec.status = rec.balance === 0 ? 'paid' : 'partial';
+      // Liquidar facturas desde la más antigua
+      let restante = amt;
+      for (const inv of invoices) {
+        if (restante <= 0) break;
+        const abono = Math.min(restante, inv.balance);
+        inv.paid += abono;
+        inv.balance = Math.max(0, inv.total - inv.paid);
+        inv.status = inv.balance <= 0.004 ? 'paid' : 'partial';
+        restante -= abono;
       }
       db.accounting.unshift({
         id: db.accounting.length + 1,

@@ -1311,7 +1311,7 @@ function renderCxC() {
       </div>
       <div class="dt-wrap">
         <table class="dt">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Documento</th><th>Cliente</th><th>Vence</th><th class="num">Total</th><th class="num">Pagado</th><th class="num">Saldo</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <thead><tr><th>Cliente / Proveedor</th><th class="num">Docs</th><th class="num">Deuda total</th><th class="num">Pagado</th><th class="num">Saldo</th><th>Estado</th><th>Acciones</th></tr></thead>
           <tbody id="cxcTbody"></tbody>
         </table>
       </div>
@@ -1329,39 +1329,86 @@ function paintCxC() {
   const list = db.receivables.filter(r => !q || r.client.toLowerCase().includes(q) || r.docNumber.toLowerCase().includes(q));
   const tb = $('#cxcTbody');
   if (!tb) return;
-  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="10" class="empty">Sin documentos</td></tr>`; return; }
-  tb.innerHTML = list.map(r => {
-    const overdue = r.status !== 'paid' && new Date(r.dueDate) < new Date();
-    const hasSale = db.sales.some(s => s.number === r.docNumber);
-    return `<tr style="${hasSale ? 'cursor:pointer' : ''}" ${hasSale ? `data-docnum="${esc(r.docNumber)}"` : ''}>
-      <td>${fmt.date(r.date)}</td>
-      <td>${r.docType}</td>
-      <td><code>${r.docNumber}</code></td>
-      <td>${r.client}</td>
-      <td>${fmt.date(r.dueDate)} ${overdue ? '<span class="pill red">vencida</span>' : ''}</td>
-      <td class="num">${fmt.money(r.total)}</td>
-      <td class="num">${fmt.money(r.paid)}</td>
-      <td class="num"><b>${fmt.money(r.balance)}</b></td>
-      <td>${statusPill(r.status)}</td>
+  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">Sin documentos</td></tr>`; return; }
+
+  // Agrupar por cliente
+  const groups = {};
+  list.forEach(r => {
+    if (!groups[r.client]) groups[r.client] = [];
+    groups[r.client].push(r);
+  });
+
+  // Estado global del grupo
+  const groupStatus = (docs) => {
+    const allPaid = docs.every(d => d.status === 'paid');
+    const allPending = docs.every(d => d.status === 'pending');
+    if (allPaid) return 'paid';
+    if (allPending) return 'pending';
+    return 'partial';
+  };
+
+  let rows = '';
+  Object.keys(groups).sort().forEach(client => {
+    const docs = groups[client];
+    const totalDeuda = docs.reduce((s, d) => s + d.total, 0);
+    const totalPaid = docs.reduce((s, d) => s + d.paid, 0);
+    const totalBalance = docs.reduce((s, d) => s + d.balance, 0);
+    const pendientes = docs.filter(d => d.status !== 'paid').length;
+    const gs = groupStatus(docs);
+    const hasOverdue = docs.some(d => d.status !== 'paid' && new Date(d.dueDate) < new Date());
+    rows += `<tr class="cxc-group" data-client="${esc(client)}" style="cursor:pointer;background:#f8fafc;border-top:2px solid #e5e7eb">
+      <td><b style="color:#1e40af">${esc(client)}</b> ${hasOverdue ? '<span class="pill red">vencida</span>' : ''}</td>
+      <td class="num">${docs.length} (${pendientes} pen.)</td>
+      <td class="num">${fmt.money(totalDeuda)}</td>
+      <td class="num">${fmt.money(totalPaid)}</td>
+      <td class="num"><b>${fmt.money(totalBalance)}</b></td>
+      <td>${statusPill(gs)}</td>
       <td class="actions-cell">
-        ${hasSale ? `<button class="btn sm" data-viewcxc="${esc(r.docNumber)}" title="Ver detalle de la venta">Ver</button>` : ''}
-        ${r.status !== 'paid' ? `<button class="btn sm primary" data-pay="${r.id}">Pagar</button>` : ''}
+        ${pendientes > 0 ? `<button class="btn sm primary" data-cobrar="${esc(client)}" title="Registrar cobro">Cobrar</button>` : ''}
       </td>
     </tr>`;
-  }).join('');
-  $$('button[data-pay]', tb).forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); paymentForm(+b.dataset.pay); }));
+    // Filas detalladas (ocultas por defecto)
+    docs.forEach(d => {
+      const overdue = d.status !== 'paid' && new Date(d.dueDate) < new Date();
+      const hasSale = db.sales.some(s => s.number === d.docNumber);
+      rows += `<tr class="cxc-detail cxc-detail-${esc(client)}" style="display:none">
+        <td style="padding-left:28px"><code>${d.docNumber}</code> · ${fmt.date(d.date)} ${overdue ? '<span class="pill red">vencida</span>' : ''}</td>
+        <td class="num">1</td>
+        <td class="num">${fmt.money(d.total)}</td>
+        <td class="num">${fmt.money(d.paid)}</td>
+        <td class="num"><b>${fmt.money(d.balance)}</b></td>
+        <td>${statusPill(d.status)}</td>
+        <td class="actions-cell">
+          ${hasSale ? `<button class="btn sm" data-viewcxc="${esc(d.docNumber)}" title="Ver detalle">Ver</button>` : ''}
+        </td>
+      </tr>`;
+    });
+  });
+  tb.innerHTML = rows;
+
+  // Toggle expandir/colapsar
+  $$('tr.cxc-group', tb).forEach(row => row.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    const client = row.dataset.client;
+    const details = $$(`.cxc-detail-${CSS.escape(client)}`, tb);
+    const visible = details.length > 0 && details[0].style.display !== 'none';
+    details.forEach(d => d.style.display = visible ? 'none' : '');
+  }));
+
+  // Botón cobrar
+  $$('button[data-cobrar]', tb).forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const clientName = b.dataset.cobrar;
+    const clientDebts = db.receivables.filter(r => r.client === clientName && r.status !== 'paid');
+    if (clientDebts.length > 0) paymentForm(clientDebts[0].id);
+  }));
+
+  // Ver detalle de venta
   $$('button[data-viewcxc]', tb).forEach(b => b.addEventListener('click', (e) => {
     e.stopPropagation();
-    const docNum = b.dataset.viewcxc;
-    const sale = db.sales.find(s => s.number === docNum);
+    const sale = db.sales.find(s => s.number === b.dataset.viewcxc);
     if (sale && typeof posLastDetail === 'function') posLastDetail(sale.id);
     else toast('Venta no encontrada', 'warn');
-  }));
-  $$('tr[data-docnum]', tb).forEach(row => row.addEventListener('click', () => {
-    const docNum = row.dataset.docnum;
-    const sale = db.sales.find(s => s.number === docNum);
-    if (sale && typeof posLastDetail === 'function') posLastDetail(sale.id);
-    else toast('Venta no encontrada para este documento', 'warn');
   }));
 }
 
@@ -1401,45 +1448,102 @@ function cxcForm() {
 }
 
 function paymentForm(id) {
-  const r = id ? db.receivables.find(x => x.id === id) : db.receivables[0];
-  if (!r) { toast('Sin documentos pendientes', 'warn'); return; }
+  const r = id ? db.receivables.find(x => x.id === id) : null;
+  if (!r) { toast('Documento no encontrado', 'warn'); return; }
+  // Deudas pendientes del mismo cliente, ordenadas por fecha (más antigua primero)
+  const clientDebts = db.receivables
+    .filter(x => x.client === r.client && x.status !== 'paid')
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const totalDeuda = clientDebts.reduce((s, d) => s + d.balance, 0);
   const html = `
-    <div class="field"><label>Documento</label>
-      <select id="payDoc">${db.receivables.filter(x => x.status !== 'paid').map(x => `<option value="${x.id}" ${r && x.id === r.id ? 'selected' : ''}>${x.docNumber} — ${x.client} — saldo ${fmt.money(x.balance)}</option>`).join('')}</select>
+    <div style="margin-bottom:10px;padding:10px;background:#f0f4ff;border-radius:8px;font-size:12px">
+      <b>${r.client}</b> — Deuda total: <b>${fmt.money(totalDeuda)}</b> (${clientDebts.length} documento${clientDebts.length > 1 ? 's' : ''} pendiente${clientDebts.length > 1 ? 's' : ''})
     </div>
-    <div class="field"><label>Monto a pagar</label><input type="number" step="0.01" id="payAmt" value="${r ? r.balance.toFixed(2) : 0}" /></div>
+    <div style="max-height:160px;overflow-y:auto;margin-bottom:8px">
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead><tr style="background:#e5e7eb"><th style="text-align:left;padding:4px">Fecha</th><th style="text-align:left;padding:4px">Documento</th><th style="text-align:right;padding:4px">Total</th><th style="text-align:right;padding:4px">Saldo</th><th style="padding:4px"></th></tr></thead>
+        <tbody>${clientDebts.map(d => {
+          const hasSale = db.sales.some(s => s.number === d.docNumber);
+          return `<tr style="cursor:pointer;border-bottom:1px solid #e5e7eb" data-paydoc="${esc(d.docNumber)}" data-hassale="${hasSale ? '1' : '0'}">
+            <td style="padding:4px">${fmt.date(d.date)}</td>
+            <td style="padding:4px"><code>${d.docNumber}</code></td>
+            <td style="padding:4px;text-align:right">${fmt.money(d.total)}</td>
+            <td style="padding:4px;text-align:right;font-weight:700">${fmt.money(d.balance)}</td>
+            <td style="padding:4px;text-align:center">${hasSale ? '<span style="color:#2563eb" title="Ver detalle">🔍</span>' : ''}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+    <div class="field"><label>Monto a cobrar (USD)</label><input type="number" step="0.01" id="payAmt" value="${r.balance.toFixed(2)}" /></div>
     <div class="field"><label>Fecha</label><input type="date" id="payDate" value="${veDate()}" /></div>
     <div class="field"><label>Forma de pago</label>
-      <select id="payForm"><option>Efectivo</option><option>Transferencia</option><option>Cheque</option><option>Tarjeta</option></select>
+      <select id="payForm"><option>Pagomóvil</option><option>Transferencia</option><option>Tarjeta</option><option>Efectivo Bs.</option><option>Efectivo USD</option></select>
     </div>
+    <div id="payPreview" style="margin-top:8px;padding:8px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:11px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="paySave">Registrar pago</button>`;
-  openModal({ title: 'Registrar pago (CxC)', body: html, footer });
+  openModal({ title: 'Cobranza — ' + r.client, body: html, footer });
+
+  const previewLiquidacion = () => {
+    const amt = parseFloat($('#payAmt')?.value) || 0;
+    const el = $('#payPreview');
+    if (!el) return;
+    if (amt <= 0) { el.innerHTML = ''; return; }
+    let restante = amt;
+    const lineas = [];
+    for (const d of clientDebts) {
+      if (restante <= 0) break;
+      const abono = Math.min(restante, d.balance);
+      const nuevoSaldo = d.balance - abono;
+      lineas.push({ doc: d.docNumber, abono, nuevoSaldo, liquidada: nuevoSaldo <= 0.004 });
+      restante -= abono;
+    }
+    el.innerHTML = `<b>Liquidación (más antigua → más reciente):</b>
+      ${lineas.map(l => `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #e5e7eb">
+        <span>${l.doc}</span><span>${l.liquidada ? '<span style="color:#16a34a">Liquidada</span>' : `Abono ${fmt.money(l.abono)}`}</span>
+        ${!l.liquidada ? `<span>Saldo: ${fmt.money(l.nuevoSaldo)}</span>` : ''}
+      </div>`).join('')}
+      ${restante > 0.004 ? `<div style="margin-top:4px;color:#16a34a"><b>Sobrante:</b> ${fmt.money(restante)}</div>` : ''}`;
+  };
+
   setTimeout(() => {
-    $('#payDoc').addEventListener('change', () => {
-      const d = db.receivables.find(x => x.id === +$('#payDoc').value);
-      if (d) $('#payAmt').value = d.balance.toFixed(2);
-    });
+    $('#payAmt').addEventListener('input', previewLiquidacion);
+    previewLiquidacion();
+    // Clic en factura → ver detalle de venta
+    $$('tr[data-paydoc]', document).forEach(row => row.addEventListener('click', () => {
+      if (row.dataset.hassale !== '1') return;
+      const docNum = row.dataset.paydoc;
+      const sale = db.sales.find(s => s.number === docNum);
+      if (sale) { closeModal(); posLastDetail(sale.id); }
+      else toast('Venta no encontrada', 'warn');
+    }));
     $('#paySave').addEventListener('click', () => {
-      const docId = +$('#payDoc').value;
       const amt = parseFloat($('#payAmt').value) || 0;
       if (amt <= 0) { toast('Monto inválido', 'error'); return; }
-      const d = db.receivables.find(x => x.id === docId);
-      d.paid += amt;
-      d.balance = Math.max(0, d.total - d.paid);
-      d.status = d.balance === 0 ? 'paid' : 'partial';
-      const cli = db.clients.find(c => c.name === d.client);
+      let restante = amt;
+      const pagos = [];
+      for (const d of clientDebts) {
+        if (restante <= 0) break;
+        const abono = Math.min(restante, d.balance);
+        d.paid += abono;
+        d.balance = Math.max(0, d.total - d.paid);
+        d.status = d.balance <= 0.004 ? 'paid' : 'partial';
+        pagos.push({ doc: d.docNumber, abono });
+        restante -= abono;
+      }
+      if (pagos.length === 0) { toast('No hay deudas pendientes', 'warn'); return; }
+      const cli = db.clients.find(c => c.name === r.client);
       if (cli) cli.balance = Math.max(0, (cli.balance || 0) - amt);
       db.accounting.unshift({
         id: db.accounting.length + 1,
         date: $('#payDate').value,
         type: 'ingreso', category: 'Cobranza',
-        description: `Cobro ${d.docNumber} — ${d.client}`,
-        amount: amt, ref: 'COB-' + d.docNumber
+        description: `Cobro ${pagos.map(pg => pg.doc).join(', ')} — ${r.client}`,
+        amount: amt, ref: 'COB-' + pagos[0].doc
       });
       DB.save(db); closeModal(); renderCxC();
-      toast(`Pago registrado: ${fmt.money(amt)}`, 'success');
+      toast(`Pago registrado: ${fmt.money(amt)} (${pagos.length} doc${pagos.length > 1 ? 's' : ''})`, 'success');
     });
   }, 60);
 }
@@ -1472,7 +1576,7 @@ function renderCxP() {
       </div>
       <div class="dt-wrap">
         <table class="dt">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Documento</th><th>Proveedor</th><th>Vence</th><th class="num">Total</th><th class="num">Pagado</th><th class="num">Saldo</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Proveedor</th><th class="num">Docs</th><th class="num">Deuda total</th><th class="num">Pagado</th><th class="num">Saldo</th><th>Estado</th><th></th></tr></thead>
           <tbody id="cxpTbody"></tbody>
         </table>
       </div>
@@ -1490,20 +1594,74 @@ function paintCxP() {
   const list = db.payables.filter(p => !q || p.supplier.toLowerCase().includes(q) || p.docNumber.toLowerCase().includes(q));
   const tb = $('#cxpTbody');
   if (!tb) return;
-  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="10" class="empty">Sin documentos</td></tr>`; return; }
-  tb.innerHTML = list.map(p => `<tr>
-    <td>${fmt.date(p.date)}</td>
-    <td>${p.docType}</td>
-    <td><code>${p.docNumber}</code></td>
-    <td>${p.supplier}</td>
-    <td>${fmt.date(p.dueDate)}</td>
-    <td class="num">${fmt.money(p.total)}</td>
-    <td class="num">${fmt.money(p.paid)}</td>
-    <td class="num"><b>${fmt.money(p.balance)}</b></td>
-    <td>${statusPill(p.status)}</td>
-    <td class="actions-cell">${p.status !== 'paid' ? `<button class="btn sm primary" data-pp="${p.id}">Pagar</button>` : ''}</td>
-  </tr>`).join('');
-  $$('button[data-pp]', tb).forEach(b => b.addEventListener('click', () => supplierPaymentForm(+b.dataset.pp)));
+  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">Sin documentos</td></tr>`; return; }
+
+  // Agrupar por proveedor
+  const groups = {};
+  list.forEach(p => {
+    if (!groups[p.supplier]) groups[p.supplier] = [];
+    groups[p.supplier].push(p);
+  });
+
+  const groupStatus = (docs) => {
+    const allPaid = docs.every(d => d.status === 'paid');
+    const allPending = docs.every(d => d.status === 'pending');
+    if (allPaid) return 'paid';
+    if (allPending) return 'pending';
+    return 'partial';
+  };
+
+  let rows = '';
+  Object.keys(groups).sort().forEach(supplier => {
+    const docs = groups[supplier];
+    const totalDeuda = docs.reduce((s, d) => s + d.total, 0);
+    const totalPaid = docs.reduce((s, d) => s + d.paid, 0);
+    const totalBalance = docs.reduce((s, d) => s + d.balance, 0);
+    const pendientes = docs.filter(d => d.status !== 'paid').length;
+    const gs = groupStatus(docs);
+    const hasOverdue = docs.some(d => d.status !== 'paid' && new Date(d.dueDate) < new Date());
+    rows += `<tr class="cxp-group" data-supplier="${esc(supplier)}" style="cursor:pointer;background:#f8fafc;border-top:2px solid #e5e7eb">
+      <td><b style="color:#9333ea">${esc(supplier)}</b> ${hasOverdue ? '<span class="pill red">vencida</span>' : ''}</td>
+      <td class="num">${docs.length} (${pendientes} pen.)</td>
+      <td class="num">${fmt.money(totalDeuda)}</td>
+      <td class="num">${fmt.money(totalPaid)}</td>
+      <td class="num"><b>${fmt.money(totalBalance)}</b></td>
+      <td>${statusPill(gs)}</td>
+      <td class="actions-cell">
+        ${pendientes > 0 ? `<button class="btn sm primary" data-pagar="${esc(supplier)}" title="Registrar pago">Pagar</button>` : ''}
+      </td>
+    </tr>`;
+    docs.forEach(d => {
+      const overdue = d.status !== 'paid' && new Date(d.dueDate) < new Date();
+      rows += `<tr class="cxp-detail cxp-detail-${esc(supplier)}" style="display:none">
+        <td style="padding-left:28px"><code>${d.docNumber}</code> · ${fmt.date(d.date)} ${overdue ? '<span class="pill red">vencida</span>' : ''}</td>
+        <td class="num">1</td>
+        <td class="num">${fmt.money(d.total)}</td>
+        <td class="num">${fmt.money(d.paid)}</td>
+        <td class="num"><b>${fmt.money(d.balance)}</b></td>
+        <td>${statusPill(d.status)}</td>
+        <td></td>
+      </tr>`;
+    });
+  });
+  tb.innerHTML = rows;
+
+  // Toggle expandir/colapsar
+  $$('tr.cxp-group', tb).forEach(row => row.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    const supplier = row.dataset.supplier;
+    const details = $$(`.cxp-detail-${CSS.escape(supplier)}`, tb);
+    const visible = details.length > 0 && details[0].style.display !== 'none';
+    details.forEach(d => d.style.display = visible ? 'none' : '');
+  }));
+
+  // Botón pagar
+  $$('button[data-pagar]', tb).forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const supplierName = b.dataset.pagar;
+    const supplierDebts = db.payables.filter(p => p.supplier === supplierName && p.status !== 'paid');
+    if (supplierDebts.length > 0) supplierPaymentForm(supplierDebts[0].id);
+  }));
 }
 
 function cxpForm() {
