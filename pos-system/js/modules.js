@@ -1380,8 +1380,17 @@ function productForm(id, cloneSourceId) {
         variantGroup: p.variantGroup
       };
       canonicalizeProduct(prod);
-      if (editing) Object.assign(source, prod); else db.products.push(prod);
-      DB.save(db); closeModal(); renderDashboard('inventory'); toast('Producto guardado', 'success');
+      if (editing) {
+        Object.assign(source, prod);
+        DB.save(db); closeModal(); renderDashboard('inventory');
+        toast('Producto actualizado', 'success');
+      } else {
+        db.products.push(prod);
+        DB.save(db); renderDashboard('inventory');
+        toast('Producto "' + prod.name + '" guardado — puede crear otro o cerrar', 'success');
+        // Abrir formulario limpio para nuevo producto
+        setTimeout(() => productForm(), 100);
+      }
     });
   }, 60);
 }
