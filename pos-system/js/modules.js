@@ -267,39 +267,58 @@ function purchaseForm() {
   const curRate = () => state.rate;
   const dec2 = (v) => String(Math.round((Number(v) || 0) * 100) / 100);
 
-  // Abre el modal dedicado para configurar crédito / mixto
+  // Panel superpuesto para configurar crédito / mixto (sin cerrar modal de compras)
   const openPaymentModal = () => {
     const total = itemTotal();
     const m = mode();
     const isCredOrMix = m === 'credit' || m === 'mixto';
     if (!isCredOrMix) { recalcPaySummary(); return; }
-    const title = m === 'mixto' ? 'Configurar pago mixto' : 'Configurar crédito';
     const showMixto = m === 'mixto';
-    const html = `
+    // Crear overlay dentro del modal de compras
+    let overlay = $('#pmOverlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'pmOverlay';
+    overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;border-radius:12px';
+    const card = $('#modalCard');
+    if (card) card.style.position = 'relative';
+    const inner = document.createElement('div');
+    inner.style.cssText = 'background:#fff;border-radius:12px;padding:16px;max-width:520px;width:95%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.2)';
+    inner.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <b style="font-size:14px">${showMixto ? 'Configurar pago mixto' : 'Configurar crédito'}</b>
+        <button type="button" class="btn sm" id="pmClose" style="font-size:16px">&times;</button>
+      </div>
       <div class="form-grid">
         <div class="field"><label>Tasa BCV (Bs/USD)</label>
-          <input id="pmRate" type="number" step="0.01" min="0" value="${fmt.num(state.rate)}" title="Editable — usa la tasa BCV oficial por defecto" />
-          <div style="font-size:11px;color:#6b7280;margin-top:2px">Fuente: BCV oficial · Actualización automática cada 10 min</div>
+          <input id="pmRate" type="number" step="0.01" min="0" value="${fmt.num(state.rate)}" />
+          <div style="font-size:10px;color:#6b7280;margin-top:2px">Fuente: BCV oficial · Auto cada 10 min</div>
         </div>
         <div class="field"><label>Días de crédito</label>
           <input id="pmDays" type="number" min="1" value="${state.days}" />
         </div>
       </div>
       ${showMixto ? `
-        <div style="margin-top:10px;padding:10px;border:1px solid #e0e7ef;background:#f8fafc;border-radius:8px">
+        <div style="margin-top:8px;padding:10px;border:1px solid #e0e7ef;background:#f8fafc;border-radius:8px">
           <b style="font-size:12px;color:#374151">Pago de contado (se descuenta del total)</b>
           <div class="form-grid" style="margin-top:6px">
             <div class="field"><label>Monto en Bs.</label><input id="pmPayBs" inputmode="decimal" value="${fmt.num(state.cashBs)}" /></div>
             <div class="field"><label>Monto en USD</label><input id="pmPayUsd" inputmode="decimal" value="${fmt.num(state.cashUsd)}" /></div>
           </div>
-          <div style="font-size:11px;color:#6b7280;margin-top:4px">Escriba en uno y se calcula automáticamente el otro según la tasa BCV.</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:4px">Escriba en uno y se calcula automáticamente el otro según la tasa BCV.</div>
         </div>
       ` : ''}
       <div id="pmSum" style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px"></div>
-    `;
-    const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
-                    <button class="btn primary" id="pmSave">Aceptar</button>`;
-    openModal({ title, body: html, footer });
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button type="button" class="btn" id="pmCancel">Cancelar</button>
+        <button type="button" class="btn primary" id="pmSave">Aceptar</button>
+      </div>`;
+    overlay.appendChild(inner);
+    if (card) card.appendChild(overlay);
+
+    const closeOverlay = () => { overlay.remove(); };
+    $('#pmClose').addEventListener('click', closeOverlay);
+    $('#pmCancel').addEventListener('click', closeOverlay);
 
     const pmRecalc = () => {
       const r = fmt.parseEsp($('#pmRate').value);
@@ -318,9 +337,7 @@ function purchaseForm() {
       const bf = (t) => 'Bs. ' + fmt.esp(t * state.rate);
       $('#pmSum').innerHTML = `
         <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Total factura</span><b>${fmt.money(total)} (${bf(total)})</b></div>
-        ${showMixto ? `
-        <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Pago contado</span><b>${fmt.money(cashUSD)} (${bf(cashUSD)})</b></div>
-        ` : ''}
+        ${showMixto ? `<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>Pago contado</span><b>${fmt.money(cashUSD)} (${bf(cashUSD)})</b></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding:4px 0 0;border-top:1px dashed #bbf7d0;color:${credit > 0.004 ? '#15803d' : '#6b7280'}">
           <span>${credit > 0.004 ? 'Saldo crédito (CxP)' : 'Total cubierto'}</span>
           <b>${fmt.money(credit)} (${bf(credit)})</b>
@@ -345,7 +362,7 @@ function purchaseForm() {
         state.cashBs = 0; state.cashUsd = 0; state.cashUSD = 0;
       }
       state.creditUSD = Math.max(0, total - state.cashUSD);
-      closeModal();
+      closeOverlay();
       recalcPaySummary();
     });
   };
@@ -1523,45 +1540,80 @@ function cxpForm() {
 }
 
 function supplierPaymentForm(id) {
-  const p = id ? db.payables.find(x => x.id === id) : db.payables.find(x => x.status !== 'paid');
-  if (!p) { toast('Sin documentos pendientes', 'warn'); return; }
+  const p = id ? db.payables.find(x => x.id === id) : null;
+  if (!p) { toast('Documento no encontrado', 'warn'); return; }
+  // Deudas pendientes del mismo proveedor, ordenadas por fecha (más antigua primero)
+  const supplierDebts = db.payables
+    .filter(x => x.supplier === p.supplier && x.status !== 'paid')
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const totalDeuda = supplierDebts.reduce((s, d) => s + d.balance, 0);
   const html = `
-    <div class="field"><label>Documento</label>
-      <select id="sppDoc">${db.payables.filter(x => x.status !== 'paid').map(x => `<option value="${x.id}" ${p && x.id === p.id ? 'selected' : ''}>${x.docNumber} — ${x.supplier} — saldo ${fmt.money(x.balance)}</option>`).join('')}</select>
+    <div style="margin-bottom:10px;padding:10px;background:#f0f4ff;border-radius:8px;font-size:12px">
+      <b>${p.supplier}</b> — Deuda total: <b>${fmt.money(totalDeuda)}</b> (${supplierDebts.length} documento${supplierDebts.length > 1 ? 's' : ''} pendiente${supplierDebts.length > 1 ? 's' : ''})
     </div>
-    <div class="field"><label>Monto a pagar</label><input type="number" step="0.01" id="sppAmt" value="${p ? p.balance.toFixed(2) : 0}" /></div>
+    <div class="field"><label>Monto a pagar (USD)</label><input type="number" step="0.01" id="sppAmt" value="${p.balance.toFixed(2)}" /></div>
     <div class="field"><label>Fecha</label><input type="date" id="sppDate" value="${veDate()}" /></div>
     <div class="field"><label>Forma de pago</label>
-      <select id="sppForm"><option>Transferencia</option><option>Efectivo</option><option>Cheque</option></select>
+      <select id="sppForm"><option>Pagomóvil</option><option>Transferencia</option><option>Tarjeta</option><option>Efectivo Bs.</option><option>Efectivo USD</option></select>
     </div>
+    <div id="sppPreview" style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:12px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="sppSave">Registrar pago</button>`;
   openModal({ title: 'Registrar pago a proveedor', body: html, footer });
+
+  const previewLiquidacion = () => {
+    const amt = parseFloat($('#sppAmt').value) || 0;
+    let restante = amt;
+    const lineas = [];
+    for (const d of supplierDebts) {
+      if (restante <= 0) break;
+      const abono = Math.min(restante, d.balance);
+      const nuevoSaldo = d.balance - abono;
+      lineas.push({
+        doc: d.docNumber, abono, nuevoSaldo,
+        status: nuevoSaldo <= 0.004 ? 'Liquidada' : `Abono ${fmt.money(abono)}`
+      });
+      restante -= abono;
+    }
+    const el = $('#sppPreview');
+    if (!el) return;
+    if (amt <= 0) { el.innerHTML = '<span style="color:#6b7280">Ingrese un monto para ver la liquidación</span>'; return; }
+    el.innerHTML = `<b style="font-size:12px">Liquidación automática (más antigua → más reciente):</b>
+      <div style="margin-top:6px">${lineas.map(l => `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #e5e7eb">
+        <span>${l.doc}</span><span>${l.status}</span>${l.nuevoSaldo > 0.004 ? `<span>Saldo: ${fmt.money(l.nuevoSaldo)}</span>` : ''}
+      </div>`).join('')}</div>
+      ${restante > 0.004 ? `<div style="margin-top:4px;color:#15803d"><b>Sobrante:</b> ${fmt.money(restante)} (no se aplicó)</div>` : ''}`;
+  };
   setTimeout(() => {
-    $('#sppDoc').addEventListener('change', () => {
-      const d = db.payables.find(x => x.id === +$('#sppDoc').value);
-      if (d) $('#sppAmt').value = d.balance.toFixed(2);
-    });
+    $('#sppAmt').addEventListener('input', previewLiquidacion);
+    previewLiquidacion();
     $('#sppSave').addEventListener('click', () => {
-      const docId = +$('#sppDoc').value;
       const amt = parseFloat($('#sppAmt').value) || 0;
       if (amt <= 0) { toast('Monto inválido', 'error'); return; }
-      const d = db.payables.find(x => x.id === docId);
-      d.paid += amt;
-      d.balance = Math.max(0, d.total - d.paid);
-      d.status = d.balance === 0 ? 'paid' : 'partial';
-      const sup = db.suppliers.find(s => s.name === d.supplier);
+      let restante = amt;
+      const pagos = [];
+      for (const d of supplierDebts) {
+        if (restante <= 0) break;
+        const abono = Math.min(restante, d.balance);
+        d.paid += abono;
+        d.balance = Math.max(0, d.total - d.paid);
+        d.status = d.balance <= 0.004 ? 'paid' : 'partial';
+        pagos.push({ doc: d.docNumber, abono });
+        restante -= abono;
+      }
+      if (pagos.length === 0) { toast('No hay deudas pendientes para este proveedor', 'warn'); return; }
+      const sup = db.suppliers.find(s => s.name === p.supplier);
       if (sup) sup.balance = Math.max(0, (sup.balance || 0) - amt);
       db.accounting.unshift({
         id: db.accounting.length + 1,
         date: $('#sppDate').value,
         type: 'egreso', category: 'Proveedores',
-        description: `Pago ${d.docNumber} — ${d.supplier}`,
-        amount: amt, ref: 'PAG-' + d.docNumber
+        description: `Pago ${pagos.map(pg => pg.doc).join(', ')} — ${p.supplier}`,
+        amount: amt, ref: 'PAG-' + pagos[0].doc
       });
       DB.save(db); closeModal(); renderCxP();
-      toast(`Pago a proveedor: ${fmt.money(amt)}`, 'success');
+      toast(`Pago registrado: ${fmt.money(amt)} (${pagos.length} doc${pagos.length > 1 ? 's' : ''} liquidado${pagos.length > 1 ? 's' : ''})`, 'success');
     });
   }, 60);
 }
