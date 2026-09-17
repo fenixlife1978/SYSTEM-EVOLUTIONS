@@ -515,6 +515,7 @@ function renderInventory() {
       <h3>Inventario</h3>
       <div class="actions">
         <button class="btn" id="invKardex">${ico('units')} Kardex</button>
+        <button class="btn" id="invAdjust">${ico('refresh')} Ajuste</button>
         <button class="btn primary" id="newProduct">+ Nuevo producto</button>
         <button class="btn" id="exportInv">Exportar</button>
       </div>
@@ -556,6 +557,7 @@ function renderInventory() {
     productForm();
   });
   $('#invKardex').addEventListener('click', inventoryKardex);
+  $('#invAdjust').addEventListener('click', inventoryAdjustment);
   $('#exportInv').addEventListener('click', () => {
     const esc = (s) => String(s == null ? '' : s).replace(/"/g, '""');
     const csv = 'Codigo,Descripcion,Categoria,UnidadCanonica,StockCanonico,StockDescompuesto,PrecioBase,ValorBase\n' +
@@ -696,6 +698,113 @@ function showKardex(pid) {
   const footer = `<button class="btn" onclick="closeModal();setTimeout(function(){inventoryKardex()},60)">Buscar otro</button>
                   <button class="btn primary" onclick="closeModal()">Listo</button>`;
   openModal({ title: 'Tarjeta Kardex — ' + p.name, body: html, footer, size: 'modal-lg' });
+}
+
+function inventoryAdjustment() {
+  const list = db.products.map(p => { canonicalizeProduct(p); return p; });
+  const types = [
+    { k: 'positive', lbl: 'Ajuste positivo (sobrante)', color: '#16a34a' },
+    { k: 'negative', lbl: 'Ajuste negativo (faltante)', color: '#dc2626' },
+    { k: 'consumo', lbl: 'Consumo propio', color: '#d97706' },
+    { k: 'colaboracion', lbl: 'Colaboración', color: '#2563eb' },
+    { k: 'donacion', lbl: 'Donación', color: '#7c3aed' },
+    { k: 'otro', lbl: 'Otro', color: '#6b7280' }
+  ];
+  const html = `
+    <div class="form-grid">
+      <div class="field span-2"><label>Producto</label>
+        <select id="iaProduct">${list.map(p => `<option value="${p.id}">${p.code} — ${p.name} (Stock: ${invStock(p)} ${invBaseUnit(p)})</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Tipo de ajuste</label>
+        <select id="iaType">${types.map(t => `<option value="${t.k}">${t.lbl}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Cantidad (unidad canónica)</label>
+        <input type="number" step="0.01" min="0.01" id="iaQty" value="1" />
+      </div>
+      <div class="field span-2"><label>Motivo *</label>
+        <textarea id="iaReason" rows="2" placeholder="Describa el motivo del ajuste..." style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div id="iaPreview" style="margin-top:8px;padding:8px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:11px"></div>
+  `;
+  const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
+                  <button class="btn primary" id="iaSave">Registrar ajuste</button>`;
+  openModal({ title: 'Ajuste de Inventario', body: html, footer });
+
+  const updatePreview = () => {
+    const p = list.find(x => x.id === +$('#iaProduct')?.value);
+    const type = types.find(t => t.k === $('#iaType')?.value);
+    const qty = parseFloat($('#iaQty')?.value) || 0;
+    const el = $('#iaPreview');
+    if (!el || !p || !type) return;
+    const currentStock = invStock(p);
+    const unit = invBaseUnit(p);
+    const isPositive = type.k === 'positive' || type.k === 'consumo' || type.k === 'colaboracion' || type.k === 'donacion';
+    // Para negativo y "otro" se resta, para positivo/consumo/colaboración/donación se suma
+    // Pero consumo propio y donación son salidas reales del inventario
+    let newStock;
+    if (type.k === 'positive') newStock = currentStock + qty;
+    else if (type.k === 'negative') newStock = currentStock - qty;
+    else if (type.k === 'consumo') newStock = currentStock - qty; // sale del inventario
+    else if (type.k === 'colaboracion') newStock = currentStock - qty; // sale del inventario
+    else if (type.k === 'donacion') newStock = currentStock - qty; // sale del inventario
+    else newStock = currentStock; // "otro" sin efecto automático en stock
+    el.innerHTML = `
+      <b>Vista previa:</b>
+      <div style="display:flex;justify-content:space-between;padding:2px 0"><span>Stock actual</span><b>${currentStock.toFixed(2)} ${unit}</b></div>
+      <div style="display:flex;justify-content:space-between;padding:2px 0"><span>Ajuste</span><span style="color:${type.color}"><b>${isPositive && type.k === 'positive' ? '+' : '-'}${qty.toFixed(2)} ${unit}</b> (${type.lbl})</span></div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-top:1px dashed #d1d5db;font-weight:700"><span>Nuevo stock</span><b>${newStock.toFixed(2)} ${unit}</b></div>
+      ${newStock < 0 ? '<div style="color:#dc2626;font-size:11px;margin-top:4px">⚠️ El stock resultante es negativo</div>' : ''}`;
+  };
+
+  setTimeout(() => {
+    $('#iaProduct').addEventListener('change', updatePreview);
+    $('#iaType').addEventListener('change', updatePreview);
+    $('#iaQty').addEventListener('input', updatePreview);
+    updatePreview();
+    $('#iaSave').addEventListener('click', () => {
+      const p = list.find(x => x.id === +$('#iaProduct')?.value);
+      const type = types.find(t => t.k === $('#iaType')?.value);
+      const qty = parseFloat($('#iaQty')?.value) || 0;
+      const reason = ($('#iaReason')?.value || '').trim();
+      if (!p) { toast('Seleccione un producto', 'warn'); return; }
+      if (qty <= 0) { toast('La cantidad debe ser mayor a 0', 'warn'); return; }
+      if (!reason) { toast('Debe indicar el motivo del ajuste', 'warn'); return; }
+      // Aplicar ajuste
+      const unit = invBaseUnit(p);
+      const currentStock = invStock(p);
+      let newStock;
+      if (type.k === 'positive') newStock = currentStock + qty;
+      else if (type.k === 'negative') newStock = currentStock - qty;
+      else if (type.k === 'consumo') newStock = currentStock - qty;
+      else if (type.k === 'colaboracion') newStock = currentStock - qty;
+      else if (type.k === 'donacion') newStock = currentStock - qty;
+      else newStock = currentStock;
+      // Guardar en stockBase
+      p.stockBase = newStock;
+      // Registrar movimiento
+      if (!db.inventoryMovements) db.inventoryMovements = [];
+      db.inventoryMovements.push({
+        id: db.inventoryMovements.length + 1,
+        date: veDate(),
+        productId: p.id,
+        productCode: p.code,
+        productName: p.name,
+        type: type.k,
+        typeLabel: type.lbl,
+        qty,
+        unit,
+        previousStock: currentStock,
+        newStock,
+        reason,
+        user: session?.user?.name || 'Sistema'
+      });
+      DB.save(db);
+      closeModal();
+      renderInventory();
+      toast(`Ajuste registrado: ${p.name} → ${newStock.toFixed(2)} ${unit}`, 'success');
+    });
+  }, 60);
 }
 
 /* ============================================================
@@ -1220,10 +1329,10 @@ function renderSales() {
       <h3>Historial de ventas</h3>
     </div>
     <div class="grid cols-4" style="margin-bottom:14px">
-      <div class="kpi"><div class="kpi-info"><div class="lbl">Total ventas</div><div class="val">${fmt.money(total)}</div></div><div class="kpi-ico">${ico('cxc')}</div></div>
-      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Operaciones</div><div class="val">${db.sales.length}</div></div><div class="kpi-ico">${ico('sales')}</div></div>
-      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Contado</div><div class="val">${db.sales.filter(s => s.status === 'paid').length}</div></div><div class="kpi-ico">${ico('check')}</div></div>
-      <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">A crédito</div><div class="val">${db.sales.filter(s => s.status === 'credit').length}</div></div><div class="kpi-ico">${ico('pending')}</div></div>
+      <div class="kpi"><div class="kpi-info"><div class="lbl">Total ventas</div><div class="val" id="salKpiTotal">${fmt.money(total)}</div></div><div class="kpi-ico">${ico('cxc')}</div></div>
+      <div class="kpi k-blue"><div class="kpi-info"><div class="lbl">Operaciones</div><div class="val" id="salKpiCount">${db.sales.length}</div></div><div class="kpi-ico">${ico('sales')}</div></div>
+      <div class="kpi k-green"><div class="kpi-info"><div class="lbl">Contado</div><div class="val" id="salKpiPaid">${db.sales.filter(s => s.status === 'paid').length}</div></div><div class="kpi-ico">${ico('check')}</div></div>
+      <div class="kpi k-orange"><div class="kpi-info"><div class="lbl">A crédito</div><div class="val" id="salKpiCredit">${db.sales.filter(s => s.status === 'credit').length}</div></div><div class="kpi-ico">${ico('pending')}</div></div>
     </div>
     ${cajas.length > 1 ? `<div class="grid cols-${Math.min(cajas.length, 4)}" style="margin-bottom:14px">
       ${cajas.map(cid => {
@@ -1234,10 +1343,26 @@ function renderSales() {
     <div class="dt">
       <div class="dt-toolbar">
         <h3>Ventas registradas</h3>
-        <div class="tools">
+        <div class="tools" style="flex-wrap:wrap;gap:6px">
           <input class="search" id="salSearch" placeholder="Buscar por cliente o número..." />
-          <select id="salStatus"><option value="">Todas</option><option value="paid">Pagadas</option><option value="credit">A crédito</option><option value="refunded">Reembolsadas</option></select>
+          <select id="salStatus"><option value="">Todos los estados</option><option value="paid">Pagadas</option><option value="credit">A crédito</option><option value="refunded">Reembolsadas</option></select>
+          <select id="salPeriod">
+            <option value="">Todo el historial</option>
+            <option value="today">Hoy</option>
+            <option value="yesterday">Ayer</option>
+            <option value="week">Esta semana</option>
+            <option value="month">Este mes</option>
+            <option value="lastMonth">Mes anterior</option>
+            <option value="year">Este año</option>
+            <option value="custom">Personalizado...</option>
+          </select>
+          <div id="salCustomDates" style="display:none;gap:4px;align-items:center">
+            <input type="date" id="salDateFrom" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+            <span style="color:#6b7280">—</span>
+            <input type="date" id="salDateTo" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+          </div>
           ${cajas.length > 1 ? `<select id="salCaja"><option value="">Todas las cajas</option>${cajas.map(c => `<option value="${c}">${c}</option>`).join('')}</select>` : ''}
+          <button class="btn sm" id="salClearFilters" title="Limpiar filtros">Limpiar</button>
         </div>
       </div>
       <div class="dt-wrap">
@@ -1245,29 +1370,92 @@ function renderSales() {
           <thead><tr><th>Fecha</th><th>N° Recibo</th><th>Caja</th><th>Cliente</th><th class="num">Items</th><th class="num">Total</th><th>Estado</th></tr></thead>
           <tbody id="salTbody"></tbody>
         </table>
+        <div id="salSummary" style="margin-top:8px;padding:8px 12px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:12px;display:none"></div>
       </div>
     </div>
   `;
   $('#dashContent').innerHTML = html;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dateRange = (from, to) => {
+    const f = new Date(from); f.setHours(0,0,0,0);
+    const t = new Date(to); t.setHours(23,59,59,999);
+    return { from: f, to: t };
+  };
+  const startOfWeek = (d) => { const r = new Date(d); r.setDate(r.getDate() - r.getDay()); r.setHours(0,0,0,0); return r; };
+  const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+  const startOfLastMonth = (d) => new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  const endOfLastMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999);
+  const startOfYear = (d) => new Date(d.getFullYear(), 0, 1);
+
+  const getDateFilter = () => {
+    const p = $('#salPeriod')?.value;
+    const now = new Date();
+    if (!p || p === '') return null;
+    if (p === 'today') return dateRange(today, now);
+    if (p === 'yesterday') { const y = new Date(today); y.setDate(y.getDate()-1); return dateRange(y, y); }
+    if (p === 'week') return dateRange(startOfWeek(now), now);
+    if (p === 'month') return dateRange(startOfMonth(now), now);
+    if (p === 'lastMonth') return dateRange(startOfLastMonth(now), endOfLastMonth(now));
+    if (p === 'year') return dateRange(startOfYear(now), now);
+    if (p === 'custom') {
+      const from = $('#salDateFrom')?.value;
+      const to = $('#salDateTo')?.value;
+      if (from && to) return dateRange(from, to + 'T23:59:59');
+      return null;
+    }
+    return null;
+  };
+
   paintSales();
   $('#salSearch').addEventListener('input', paintSales);
   $('#salStatus').addEventListener('change', paintSales);
   $('#salCaja')?.addEventListener('change', paintSales);
+  $('#salPeriod').addEventListener('change', () => {
+    const isCustom = $('#salPeriod').value === 'custom';
+    const cd = $('#salCustomDates');
+    if (cd) cd.style.display = isCustom ? 'flex' : 'none';
+    paintSales();
+  });
+  $('#salDateFrom')?.addEventListener('change', paintSales);
+  $('#salDateTo')?.addEventListener('change', paintSales);
+  $('#salClearFilters').addEventListener('click', () => {
+    const s = $('#salSearch'); if (s) s.value = '';
+    const st = $('#salStatus'); if (st) st.value = '';
+    const p = $('#salPeriod'); if (p) p.value = '';
+    const c = $('#salCaja'); if (c) c.value = '';
+    const cd = $('#salCustomDates'); if (cd) cd.style.display = 'none';
+    paintSales();
+  });
+  // Exponer helpers para paintSales
+  window._salDateFilter = getDateFilter;
+  window._salFormatDate = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+  };
 }
 
 function paintSales() {
   const q = ($('#salSearch')?.value || '').toLowerCase();
   const st = $('#salStatus')?.value || '';
   const cid = $('#salCaja')?.value || '';
+  const df = window._salDateFilter ? window._salDateFilter() : null;
+  const fmtD = window._salFormatDate || ((d) => d);
   const list = db.sales.filter(s => {
     if (st && s.status !== st) return false;
     if (cid && s.caja_id !== cid) return false;
-    if (q && !s.client.toLowerCase().includes(q) && !s.number.includes(q)) return false;
+    if (q && !s.client.toLowerCase().includes(q) && !s.number.toLowerCase().includes(q)) return false;
+    if (df) {
+      const sd = fmtD(s.date);
+      const sdt = new Date(s.date); sdt.setHours(0,0,0,0);
+      if (sdt < df.from || sdt > df.to) return false;
+    }
     return true;
   });
   const tb = $('#salTbody');
   if (!tb) return;
-  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">Sin ventas</td></tr>`; return; }
+  if (list.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">Sin ventas para los filtros seleccionados</td></tr>`; updateSalesSummary([], df); return; }
   tb.innerHTML = list.map(s => `
     <tr>
       <td>${s.date}</td>
@@ -1278,6 +1466,26 @@ function paintSales() {
       <td class="num">${fmt.money(s.total)}</td>
       <td>${statusPill(s.status)}</td>
     </tr>`).join('');
+  updateSalesSummary(list, df);
+}
+
+function updateSalesSummary(list, dateFilter) {
+  const el = $('#salSummary');
+  if (!el) return;
+  const totalVentas = list.reduce((s, x) => s + x.total, 0);
+  const count = list.length;
+  const paid = list.filter(s => s.status === 'paid').length;
+  const credit = list.filter(s => s.status === 'credit').length;
+  const refunded = list.filter(s => s.status === 'refunded').length;
+  const avgTicket = count > 0 ? totalVentas / count : 0;
+  const label = dateFilter ? 'Período filtrado' : 'Totales';
+  el.style.display = count > 0 ? 'block' : 'none';
+  el.innerHTML = `<b>${label}:</b> ${count} venta${count !== 1 ? 's' : ''} · ${fmt.money(totalVentas)} · Ticket promedio: ${fmt.money(avgTicket)} · Pagadas: ${paid} · Crédito: ${credit} · Reembolsadas: ${refunded}`;
+  // Actualizar KPIs
+  const kTotal = $('#salKpiTotal'); if (kTotal) kTotal.textContent = fmt.money(totalVentas);
+  const kCount = $('#salKpiCount'); if (kCount) kCount.textContent = count;
+  const kPaid = $('#salKpiPaid'); if (kPaid) kPaid.textContent = paid;
+  const kCredit = $('#salKpiCredit'); if (kCredit) kCredit.textContent = credit;
 }
 
 /* ============================================================
