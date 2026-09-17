@@ -869,11 +869,13 @@ function posCollect() {
   const c = ticket.customer;
   const bal = Number(c?.balance) || 0;
   if (bal <= 0) { toast('El cliente no posee saldo pendiente', 'info'); return; }
+  const currentRate = fmt.usdRate();
   // Facturas pendientes del cliente, ordenadas por fecha (más antigua primero)
   const invoices = db.receivables
     .filter(r => r.client === c.name && r.status !== 'paid')
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const hasInvoices = invoices.length > 0;
+  const methodCur = () => { const m = PAY_METHODS.find(x => x.k === $('#pcForm')?.value); return m ? m.cur : 'USD'; };
   const html = `
     <div class="field"><label>Cliente</label><input value="${c.name}" disabled style="background:#f3f4f6" /></div>
     <div class="field"><label>Saldo pendiente</label><input value="${fmt.money(bal)}" disabled style="background:#f3f4f6;font-family:Consolas,monospace" /></div>
@@ -895,22 +897,45 @@ function posCollect() {
         }).join('')}</tbody>
       </table>
     </div>` : '<div style="margin:8px 0;color:#6b7280;font-size:12px">Sin facturas individuales registradas</div>'}
-    <div class="field"><label>Monto a cobrar</label><input type="number" step="0.01" min="0" id="pcAmt" value="${bal.toFixed(2)}" /></div>
+    <div class="field"><label id="pcAmtLabel">Monto a cobrar (USD)</label><input type="number" step="0.01" min="0" id="pcAmt" value="${bal.toFixed(2)}" /></div>
     <div class="field"><label>Método de pago</label>
       <select id="pcForm">${PAY_METHODS.map(m => `<option value="${m.k}">${m.lbl}</option>`).join('')}</select>
     </div>
+    <div id="pcConv" style="margin-top:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e40af;display:none"></div>
     <div id="pcPreview" style="margin-top:8px;padding:8px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:11px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="pcOk">${ico('cxc')} Registrar cobro</button>`;
   openModal({ title: 'Cobranza — ' + c.name, body: html, footer });
 
+  const getAmtUsd = () => {
+    const raw = parseFloat($('#pcAmt')?.value) || 0;
+    const cur = methodCur();
+    if (cur === 'BS') return currentRate > 0 ? raw / currentRate : 0;
+    return raw;
+  };
+
+  const updateLabel = () => {
+    const cur = methodCur();
+    const lbl = $('#pcAmtLabel');
+    if (lbl) lbl.textContent = cur === 'BS' ? 'Monto a cobrar (Bs.)' : 'Monto a cobrar (USD)';
+    const conv = $('#pcConv');
+    if (cur === 'BS') {
+      const raw = parseFloat($('#pcAmt')?.value) || 0;
+      const usd = currentRate > 0 ? raw / currentRate : 0;
+      conv.style.display = 'block';
+      conv.innerHTML = `Bs. ${fmt.esp(raw)} = <b>${fmt.money(usd)}</b> (tasa ${fmt.num(currentRate)} Bs/USD)`;
+    } else {
+      conv.style.display = 'none';
+    }
+  };
+
   const previewLiquidacion = () => {
-    const amt = parseFloat($('#pcAmt')?.value) || 0;
+    const amtUsd = getAmtUsd();
     const el = $('#pcPreview');
     if (!el || !hasInvoices) return;
-    if (amt <= 0) { el.innerHTML = ''; return; }
-    let restante = amt;
+    if (amtUsd <= 0) { el.innerHTML = ''; return; }
+    let restante = amtUsd;
     const lineas = [];
     for (const inv of invoices) {
       if (restante <= 0) break;
@@ -929,7 +954,9 @@ function posCollect() {
 
   setTimeout(() => {
     const inp = $('#pcAmt'); inp.focus();
-    inp.addEventListener('input', previewLiquidacion);
+    inp.addEventListener('input', () => { updateLabel(); previewLiquidacion(); });
+    $('#pcForm').addEventListener('change', () => { updateLabel(); previewLiquidacion(); });
+    updateLabel();
     previewLiquidacion();
     // Clic en factura → ver detalle de venta
     $$('tr[data-invdoc]', document).forEach(row => row.addEventListener('click', () => {
@@ -940,12 +967,14 @@ function posCollect() {
       else toast('Venta no encontrada', 'warn');
     }));
     $('#pcOk').addEventListener('click', () => {
-      const amt = parseFloat(inp.value) || 0;
-      if (amt <= 0 || amt > bal + 0.0001) { toast('Monto inválido', 'error'); return; }
+      const amtUsd = getAmtUsd();
+      const raw = parseFloat(inp.value) || 0;
+      if (amtUsd <= 0) { toast('Monto inválido', 'error'); return; }
+      if (amtUsd > bal + 0.0001) { toast('El monto excede el saldo pendiente', 'error'); return; }
       const met = $('#pcForm').value;
-      c.balance = Math.max(0, bal - amt);
+      c.balance = Math.max(0, bal - amtUsd);
       // Liquidar facturas desde la más antigua
-      let restante = amt;
+      let restante = amtUsd;
       for (const inv of invoices) {
         if (restante <= 0) break;
         const abono = Math.min(restante, inv.balance);
@@ -958,13 +987,14 @@ function posCollect() {
         id: db.accounting.length + 1,
         date: veDate(),
         type: 'ingreso', category: 'Cobranza',
-        description: 'Cobro POS a ' + c.name + ' · ' + METHOD_LBL(met),
-        amount: amt, ref: 'COB-' + Date.now().toString().slice(-5)
+        description: `Cobro POS a ${c.name} · ${METHOD_LBL(met)}${methodCur() === 'BS' ? ' (Bs. ' + fmt.esp(raw) + ' = ' + fmt.money(amtUsd) + ')' : ''}`,
+        amount: amtUsd, ref: 'COB-' + Date.now().toString().slice(-5),
+        rate: currentRate
       });
       DB.save(db);
       closeModal();
       renderCustomerInfo();
-      toast('Cobro registrado: ' + fmt.money(amt), 'success');
+      toast(`Cobro registrado: ${fmt.money(amtUsd)}`, 'success');
     });
   }, 60);
 }

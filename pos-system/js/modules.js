@@ -1450,14 +1450,23 @@ function cxcForm() {
 function paymentForm(id) {
   const r = id ? db.receivables.find(x => x.id === id) : null;
   if (!r) { toast('Documento no encontrado', 'warn'); return; }
+  const currentRate = fmt.usdRate();
   // Deudas pendientes del mismo cliente, ordenadas por fecha (más antigua primero)
   const clientDebts = db.receivables
     .filter(x => x.client === r.client && x.status !== 'paid')
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const totalDeuda = clientDebts.reduce((s, d) => s + d.balance, 0);
+  const payMethods = [
+    { k: 'pagomovil', lbl: 'Pagomóvil', cur: 'BS' },
+    { k: 'transferencia', lbl: 'Transferencia', cur: 'BS' },
+    { k: 'tarjeta', lbl: 'Tarjeta', cur: 'BS' },
+    { k: 'efectivoBs', lbl: 'Efectivo Bs.', cur: 'BS' },
+    { k: 'efectivoUsd', lbl: 'Efectivo USD', cur: 'USD' }
+  ];
+  const methodCur = () => { const m = payMethods.find(x => x.k === $('#payForm')?.value); return m ? m.cur : 'USD'; };
   const html = `
     <div style="margin-bottom:10px;padding:10px;background:#f0f4ff;border-radius:8px;font-size:12px">
-      <b>${r.client}</b> — Deuda total: <b>${fmt.money(totalDeuda)}</b> (${clientDebts.length} documento${clientDebts.length > 1 ? 's' : ''} pendiente${clientDebts.length > 1 ? 's' : ''})
+      <b>${r.client}</b> — Deuda total: <b>${fmt.money(totalDeuda)}</b> (${clientDebts.length} doc${clientDebts.length > 1 ? 's' : ''} pendiente${clientDebts.length > 1 ? 's' : ''})
     </div>
     <div style="max-height:160px;overflow-y:auto;margin-bottom:8px">
       <table style="width:100%;font-size:11px;border-collapse:collapse">
@@ -1474,23 +1483,46 @@ function paymentForm(id) {
         }).join('')}</tbody>
       </table>
     </div>
-    <div class="field"><label>Monto a cobrar (USD)</label><input type="number" step="0.01" id="payAmt" value="${r.balance.toFixed(2)}" /></div>
+    <div class="field"><label id="payAmtLabel">Monto a cobrar (USD)</label><input type="number" step="0.01" id="payAmt" value="${r.balance.toFixed(2)}" /></div>
     <div class="field"><label>Fecha</label><input type="date" id="payDate" value="${veDate()}" /></div>
     <div class="field"><label>Forma de pago</label>
-      <select id="payForm"><option>Pagomóvil</option><option>Transferencia</option><option>Tarjeta</option><option>Efectivo Bs.</option><option>Efectivo USD</option></select>
+      <select id="payForm">${payMethods.map(m => `<option value="${m.k}">${m.lbl}</option>`).join('')}</select>
     </div>
+    <div id="payConv" style="margin-top:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e40af;display:none"></div>
     <div id="payPreview" style="margin-top:8px;padding:8px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:11px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="paySave">Registrar pago</button>`;
   openModal({ title: 'Cobranza — ' + r.client, body: html, footer });
 
+  const getAmtUsd = () => {
+    const raw = parseFloat($('#payAmt')?.value) || 0;
+    const cur = methodCur();
+    if (cur === 'BS') return currentRate > 0 ? raw / currentRate : 0;
+    return raw;
+  };
+
+  const updateLabel = () => {
+    const cur = methodCur();
+    const lbl = $('#payAmtLabel');
+    if (lbl) lbl.textContent = cur === 'BS' ? 'Monto a cobrar (Bs.)' : 'Monto a cobrar (USD)';
+    const conv = $('#payConv');
+    if (cur === 'BS') {
+      const raw = parseFloat($('#payAmt')?.value) || 0;
+      const usd = currentRate > 0 ? raw / currentRate : 0;
+      conv.style.display = 'block';
+      conv.innerHTML = `Bs. ${fmt.esp(raw)} = <b>${fmt.money(usd)}</b> (tasa ${fmt.num(currentRate)} Bs/USD)`;
+    } else {
+      conv.style.display = 'none';
+    }
+  };
+
   const previewLiquidacion = () => {
-    const amt = parseFloat($('#payAmt')?.value) || 0;
+    const amtUsd = getAmtUsd();
     const el = $('#payPreview');
     if (!el) return;
-    if (amt <= 0) { el.innerHTML = ''; return; }
-    let restante = amt;
+    if (amtUsd <= 0) { el.innerHTML = ''; return; }
+    let restante = amtUsd;
     const lineas = [];
     for (const d of clientDebts) {
       if (restante <= 0) break;
@@ -1508,7 +1540,9 @@ function paymentForm(id) {
   };
 
   setTimeout(() => {
-    $('#payAmt').addEventListener('input', previewLiquidacion);
+    $('#payAmt').addEventListener('input', () => { updateLabel(); previewLiquidacion(); });
+    $('#payForm').addEventListener('change', () => { updateLabel(); previewLiquidacion(); });
+    updateLabel();
     previewLiquidacion();
     // Clic en factura → ver detalle de venta
     $$('tr[data-paydoc]', document).forEach(row => row.addEventListener('click', () => {
@@ -1519,9 +1553,10 @@ function paymentForm(id) {
       else toast('Venta no encontrada', 'warn');
     }));
     $('#paySave').addEventListener('click', () => {
-      const amt = parseFloat($('#payAmt').value) || 0;
-      if (amt <= 0) { toast('Monto inválido', 'error'); return; }
-      let restante = amt;
+      const amtUsd = getAmtUsd();
+      const raw = parseFloat($('#payAmt').value) || 0;
+      if (amtUsd <= 0) { toast('Monto inválido', 'error'); return; }
+      let restante = amtUsd;
       const pagos = [];
       for (const d of clientDebts) {
         if (restante <= 0) break;
@@ -1534,16 +1569,18 @@ function paymentForm(id) {
       }
       if (pagos.length === 0) { toast('No hay deudas pendientes', 'warn'); return; }
       const cli = db.clients.find(c => c.name === r.client);
-      if (cli) cli.balance = Math.max(0, (cli.balance || 0) - amt);
+      if (cli) cli.balance = Math.max(0, (cli.balance || 0) - amtUsd);
+      const metodo = payMethods.find(m => m.k === $('#payForm').value);
       db.accounting.unshift({
         id: db.accounting.length + 1,
         date: $('#payDate').value,
         type: 'ingreso', category: 'Cobranza',
-        description: `Cobro ${pagos.map(pg => pg.doc).join(', ')} — ${r.client}`,
-        amount: amt, ref: 'COB-' + pagos[0].doc
+        description: `Cobro ${pagos.map(pg => pg.doc).join(', ')} — ${r.client} · ${metodo?.lbl || ''}${methodCur() === 'BS' ? ' (Bs. ' + fmt.esp(raw) + ' = ' + fmt.money(amtUsd) + ')' : ''}`,
+        amount: amtUsd, ref: 'COB-' + pagos[0].doc,
+        rate: currentRate
       });
       DB.save(db); closeModal(); renderCxC();
-      toast(`Pago registrado: ${fmt.money(amt)} (${pagos.length} doc${pagos.length > 1 ? 's' : ''})`, 'success');
+      toast(`Pago registrado: ${fmt.money(amtUsd)} (${pagos.length} doc${pagos.length > 1 ? 's' : ''})`, 'success');
     });
   }, 60);
 }
@@ -1700,56 +1737,89 @@ function cxpForm() {
 function supplierPaymentForm(id) {
   const p = id ? db.payables.find(x => x.id === id) : null;
   if (!p) { toast('Documento no encontrado', 'warn'); return; }
+  const currentRate = fmt.usdRate();
   // Deudas pendientes del mismo proveedor, ordenadas por fecha (más antigua primero)
   const supplierDebts = db.payables
     .filter(x => x.supplier === p.supplier && x.status !== 'paid')
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const totalDeuda = supplierDebts.reduce((s, d) => s + d.balance, 0);
+  const payMethods = [
+    { k: 'pagomovil', lbl: 'Pagomóvil', cur: 'BS' },
+    { k: 'transferencia', lbl: 'Transferencia', cur: 'BS' },
+    { k: 'tarjeta', lbl: 'Tarjeta', cur: 'BS' },
+    { k: 'efectivoBs', lbl: 'Efectivo Bs.', cur: 'BS' },
+    { k: 'efectivoUsd', lbl: 'Efectivo USD', cur: 'USD' }
+  ];
+  const methodCur = () => { const m = payMethods.find(x => x.k === $('#sppForm')?.value); return m ? m.cur : 'USD'; };
   const html = `
     <div style="margin-bottom:10px;padding:10px;background:#f0f4ff;border-radius:8px;font-size:12px">
-      <b>${p.supplier}</b> — Deuda total: <b>${fmt.money(totalDeuda)}</b> (${supplierDebts.length} documento${supplierDebts.length > 1 ? 's' : ''} pendiente${supplierDebts.length > 1 ? 's' : ''})
+      <b>${p.supplier}</b> — Deuda total: <b>${fmt.money(totalDeuda)}</b> (${supplierDebts.length} doc${supplierDebts.length > 1 ? 's' : ''} pendiente${supplierDebts.length > 1 ? 's' : ''})
     </div>
-    <div class="field"><label>Monto a pagar (USD)</label><input type="number" step="0.01" id="sppAmt" value="${p.balance.toFixed(2)}" /></div>
+    <div class="field"><label id="sppAmtLabel">Monto a pagar (USD)</label><input type="number" step="0.01" id="sppAmt" value="${p.balance.toFixed(2)}" /></div>
     <div class="field"><label>Fecha</label><input type="date" id="sppDate" value="${veDate()}" /></div>
     <div class="field"><label>Forma de pago</label>
-      <select id="sppForm"><option>Pagomóvil</option><option>Transferencia</option><option>Tarjeta</option><option>Efectivo Bs.</option><option>Efectivo USD</option></select>
+      <select id="sppForm">${payMethods.map(m => `<option value="${m.k}">${m.lbl}</option>`).join('')}</select>
     </div>
+    <div id="sppConv" style="margin-top:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e40af;display:none"></div>
     <div id="sppPreview" style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e0e7ef;border-radius:8px;font-size:12px"></div>
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="sppSave">Registrar pago</button>`;
   openModal({ title: 'Registrar pago a proveedor', body: html, footer });
 
+  const getAmtUsd = () => {
+    const raw = parseFloat($('#sppAmt')?.value) || 0;
+    const cur = methodCur();
+    if (cur === 'BS') return currentRate > 0 ? raw / currentRate : 0;
+    return raw;
+  };
+
+  const updateLabel = () => {
+    const cur = methodCur();
+    const lbl = $('#sppAmtLabel');
+    if (lbl) lbl.textContent = cur === 'BS' ? 'Monto a pagar (Bs.)' : 'Monto a pagar (USD)';
+    const conv = $('#sppConv');
+    if (cur === 'BS') {
+      const raw = parseFloat($('#sppAmt')?.value) || 0;
+      const usd = currentRate > 0 ? raw / currentRate : 0;
+      conv.style.display = 'block';
+      conv.innerHTML = `Bs. ${fmt.esp(raw)} = <b>${fmt.money(usd)}</b> (tasa ${fmt.num(currentRate)} Bs/USD)`;
+    } else {
+      conv.style.display = 'none';
+    }
+  };
+
   const previewLiquidacion = () => {
-    const amt = parseFloat($('#sppAmt').value) || 0;
-    let restante = amt;
+    const amtUsd = getAmtUsd();
+    let restante = amtUsd;
     const lineas = [];
     for (const d of supplierDebts) {
       if (restante <= 0) break;
       const abono = Math.min(restante, d.balance);
       const nuevoSaldo = d.balance - abono;
-      lineas.push({
-        doc: d.docNumber, abono, nuevoSaldo,
-        status: nuevoSaldo <= 0.004 ? 'Liquidada' : `Abono ${fmt.money(abono)}`
-      });
+      lineas.push({ doc: d.docNumber, abono, nuevoSaldo, liquidada: nuevoSaldo <= 0.004 });
       restante -= abono;
     }
     const el = $('#sppPreview');
     if (!el) return;
-    if (amt <= 0) { el.innerHTML = '<span style="color:#6b7280">Ingrese un monto para ver la liquidación</span>'; return; }
+    if (amtUsd <= 0) { el.innerHTML = '<span style="color:#6b7280">Ingrese un monto para ver la liquidación</span>'; return; }
     el.innerHTML = `<b style="font-size:12px">Liquidación automática (más antigua → más reciente):</b>
       <div style="margin-top:6px">${lineas.map(l => `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #e5e7eb">
-        <span>${l.doc}</span><span>${l.status}</span>${l.nuevoSaldo > 0.004 ? `<span>Saldo: ${fmt.money(l.nuevoSaldo)}</span>` : ''}
+        <span>${l.doc}</span><span>${l.liquidada ? '<span style="color:#16a34a">Liquidada</span>' : `Abono ${fmt.money(l.abono)}`}</span>
+        ${!l.liquidada ? `<span>Saldo: ${fmt.money(l.nuevoSaldo)}</span>` : ''}
       </div>`).join('')}</div>
-      ${restante > 0.004 ? `<div style="margin-top:4px;color:#15803d"><b>Sobrante:</b> ${fmt.money(restante)} (no se aplicó)</div>` : ''}`;
+      ${restante > 0.004 ? `<div style="margin-top:4px;color:#15803d"><b>Sobrante:</b> ${fmt.money(restante)}</div>` : ''}`;
   };
   setTimeout(() => {
-    $('#sppAmt').addEventListener('input', previewLiquidacion);
+    $('#sppAmt').addEventListener('input', () => { updateLabel(); previewLiquidacion(); });
+    $('#sppForm').addEventListener('change', () => { updateLabel(); previewLiquidacion(); });
+    updateLabel();
     previewLiquidacion();
     $('#sppSave').addEventListener('click', () => {
-      const amt = parseFloat($('#sppAmt').value) || 0;
-      if (amt <= 0) { toast('Monto inválido', 'error'); return; }
-      let restante = amt;
+      const amtUsd = getAmtUsd();
+      const raw = parseFloat($('#sppAmt').value) || 0;
+      if (amtUsd <= 0) { toast('Monto inválido', 'error'); return; }
+      let restante = amtUsd;
       const pagos = [];
       for (const d of supplierDebts) {
         if (restante <= 0) break;
@@ -1762,16 +1832,18 @@ function supplierPaymentForm(id) {
       }
       if (pagos.length === 0) { toast('No hay deudas pendientes para este proveedor', 'warn'); return; }
       const sup = db.suppliers.find(s => s.name === p.supplier);
-      if (sup) sup.balance = Math.max(0, (sup.balance || 0) - amt);
+      if (sup) sup.balance = Math.max(0, (sup.balance || 0) - amtUsd);
+      const metodo = payMethods.find(m => m.k === $('#sppForm').value);
       db.accounting.unshift({
         id: db.accounting.length + 1,
         date: $('#sppDate').value,
         type: 'egreso', category: 'Proveedores',
-        description: `Pago ${pagos.map(pg => pg.doc).join(', ')} — ${p.supplier}`,
-        amount: amt, ref: 'PAG-' + pagos[0].doc
+        description: `Pago ${pagos.map(pg => pg.doc).join(', ')} — ${p.supplier} · ${metodo?.lbl || ''}${methodCur() === 'BS' ? ' (Bs. ' + fmt.esp(raw) + ' = ' + fmt.money(amtUsd) + ')' : ''}`,
+        amount: amtUsd, ref: 'PAG-' + pagos[0].doc,
+        rate: currentRate
       });
       DB.save(db); closeModal(); renderCxP();
-      toast(`Pago registrado: ${fmt.money(amt)} (${pagos.length} doc${pagos.length > 1 ? 's' : ''} liquidado${pagos.length > 1 ? 's' : ''})`, 'success');
+      toast(`Pago registrado: ${fmt.money(amtUsd)} (${pagos.length} doc${pagos.length > 1 ? 's' : ''})`, 'success');
     });
   }, 60);
 }
