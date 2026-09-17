@@ -968,7 +968,7 @@ function productForm(id, cloneSourceId) {
   `;
   const footer = `<button class="btn" onclick="closeModal()">Cancelar</button>
                   <button class="btn primary" id="pcSave">Guardar</button>`;
-  openModal({ title: editing ? 'Editar producto' : 'Nuevo producto', body: html, footer, size: 'modal-lg' });
+  openModal({ title: editing ? 'Editar producto' : 'Nuevo producto', body: html, footer, size: 'modal-lg', preventBackdropClose: true });
 
   setTimeout(() => {
     // Tab switching

@@ -23,14 +23,14 @@ jobs:
         run: npm ci
 
       - name: Compilar dependencias nativas para Electron
-        run: npx electron-builder install-app-deps
+        run: npx --no-install electron-builder install-app-deps
 
       # ─── INSTALADOR COMPLETO (NSIS) ───
       - name: Generar demo.json (versión completa)
         run: node write-demo.js false
 
       - name: Generar instalador completo (.exe NSIS)
-        run: npx electron-builder --win nsis --x64 --publish never
+        run: npx --no-install electron-builder --win nsis --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -49,7 +49,7 @@ jobs:
         run: node write-demo.js true
 
       - name: Generar Demo instalable (.exe NSIS)
-        run: npx electron-builder --config electron-builder.demo.yml --x64 --publish never
+        run: npx --no-install electron-builder --config electron-builder.demo.yml --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 

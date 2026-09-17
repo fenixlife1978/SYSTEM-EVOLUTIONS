@@ -8,6 +8,7 @@ files:
   - main.js
   - preload.js
   - db.js
+  - network.js
   - pos-system/**/*
 asar: true
 asarUnpack:

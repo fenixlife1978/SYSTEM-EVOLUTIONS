@@ -35,6 +35,26 @@ async function boot() {
 }
 
 function bindLogin() {
+  // Manejo de pestañas de Rol (Administrador / Cajero)
+  const roleButtons = $$('.rtab', $('#roleTabs') || document);
+  roleButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      roleButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const role = btn.dataset.role;
+      const hint = $('.login-hint');
+      if (role === 'cashier') {
+        if ($('#loginUser').value === 'admin' || !$('#loginUser').value) $('#loginUser').value = 'cajero';
+        if ($('#loginPass').value === 'admin' || $('#loginPass').value === '1234' || !$('#loginPass').value) $('#loginPass').value = 'cajero123';
+        if (hint) hint.innerHTML = 'Demo local &#8195; Usuario: <b>cajero</b> (o <b>cajero1</b>) &#8195; Clave: <b>cajero123</b> (o <b>1234</b>)';
+      } else {
+        if ($('#loginUser').value === 'cajero' || $('#loginUser').value === 'cajero1' || !$('#loginUser').value) $('#loginUser').value = 'admin';
+        if ($('#loginPass').value === 'cajero123' || !$('#loginPass').value) $('#loginPass').value = 'admin123';
+        if (hint) hint.innerHTML = 'Demo local &#8195; Usuario: <b>admin</b> &#8195; Clave: <b>1234</b> (o <b>admin123</b>)';
+      }
+    });
+  });
+
   // Mostrar/ocultar campo IP según selección de caja
   const cajaSelect = $('#loginCaja');
   const ipBox = $('#clientIPBox');
@@ -48,12 +68,14 @@ function bindLogin() {
     e.preventDefault();
     const u = $('#loginUser').value.trim();
     const p = $('#loginPass').value.trim();
-    const user = db.users.find(x => x.username === u);
+    const activeRole = $('.rtab.active')?.dataset?.role || 'admin';
+
+    const user = db.users.find(x => x.username.toLowerCase() === u.toLowerCase());
     const isDemoLogin = isDemo() && (
-      (u === 'admin'  && p === 'admin123') ||
-      (u === 'cajero' && p === 'cajero123')
+      (u === 'admin'  && (p === 'admin123' || p === 'admin' || p === '1234')) ||
+      ((u === 'cajero' || u === 'cajero1') && (p === 'cajero123' || p === '1234' || p === 'cajero'))
     );
-    const passOk = isDemoLogin || (p === 'admin' || p === '1234');
+    const passOk = isDemoLogin || (p === 'admin' || p === '1234' || p === 'admin123' || p === 'cajero123');
     if (!user && !isDemoLogin) {
       toast('Usuario o contraseña inválidos', 'error');
       return;
@@ -77,8 +99,8 @@ function bindLogin() {
 
     if (isDemoLogin && !user) {
       const demoUser = {
-        id: Date.now(), username: u, name: u === 'admin' ? 'Administrador Demo' : 'Cajero Demo',
-        role: u === 'admin' ? 'admin' : 'cashier', email: u + '@demo.com',
+        id: Date.now(), username: u, name: activeRole === 'cashier' || u.includes('cajero') ? 'Cajero Demo' : 'Administrador Demo',
+        role: activeRole === 'cashier' || u.includes('cajero') ? 'cashier' : 'admin', email: u + '@demo.com',
         branch: 'Principal', status: 'active', lastLogin: ''
       };
       db.users.push(demoUser);
@@ -87,7 +109,7 @@ function bindLogin() {
       session.role = demoUser.role;
     } else {
       session.user = user || db.users[0];
-      session.role = session.user.role;
+      session.role = activeRole === 'cashier' ? 'cashier' : session.user.role;
     }
     session.user.lastLogin = veStamp();
     DB.save(db);
@@ -187,11 +209,29 @@ function bindGlobal() {
   // Modal close
   $('#modalClose').addEventListener('click', closeModal);
   $('#modalBackdrop').addEventListener('click', (e) => {
-    if (e.target.id === 'modalBackdrop') closeModal();
+    if (e.target.id === 'modalBackdrop') {
+      if ($('#modalBackdrop').dataset.preventBackdropClose === 'true') {
+        const card = $('#modalCard');
+        card.classList.remove('modal-shake');
+        void card.offsetWidth;
+        card.classList.add('modal-shake');
+        return;
+      }
+      closeModal();
+    }
   });
   // Esc para cerrar
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Escape') {
+      if ($('#modalBackdrop').dataset.preventBackdropClose === 'true') {
+        const card = $('#modalCard');
+        card.classList.remove('modal-shake');
+        void card.offsetWidth;
+        card.classList.add('modal-shake');
+        return;
+      }
+      closeModal();
+    }
   });
   // Atajos globales del POS
   document.addEventListener('keydown', (e) => {
@@ -227,15 +267,17 @@ function modalIcon(title) {
   const hit = MODAL_ICONS.find(([k]) => t.includes(k));
   return hit ? hit[1] : 'bolt';
 }
-function openModal({ title, body, footer, size = '' }) {
+function openModal({ title, body, footer, size = '', preventBackdropClose = false }) {
   $('#modalTitle').textContent = title || '';
   $('#modalIcon').innerHTML = ico(modalIcon(title));
   const card = $('#modalCard');
   card.className = 'modal-card ' + size;
   $('#modalBody').innerHTML = body || '';
   $('#modalFoot').innerHTML = footer || '';
-  $('#modalBackdrop').style.display = 'flex';
-  card.classList.remove('anim-in');
+  const backdrop = $('#modalBackdrop');
+  backdrop.dataset.preventBackdropClose = preventBackdropClose ? 'true' : 'false';
+  backdrop.style.display = 'flex';
+  card.classList.remove('anim-in', 'modal-shake');
   void card.offsetWidth; // reinicia la animación
   card.classList.add('anim-in');
 }

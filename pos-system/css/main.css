@@ -141,6 +141,12 @@ table{width:100%;border-collapse:collapse}
   background:linear-gradient(90deg,var(--green) 0%,var(--green-light) 55%,var(--yellow) 100%);
 }
 .modal-card.anim-in{animation:modalIn .24s cubic-bezier(.2,.9,.3,1.15)}
+@keyframes modalShake {
+  0%, 100% { transform: scale(1); }
+  20%, 60% { transform: scale(1.01) translateX(-6px); }
+  40%, 80% { transform: scale(1.01) translateX(6px); }
+}
+.modal-card.modal-shake{animation:modalShake .25s ease-in-out}
 .modal-card.modal-lg{max-width:920px}
 .modal-head{
   padding:14px 20px;display:flex;align-items:center;gap:13px;
