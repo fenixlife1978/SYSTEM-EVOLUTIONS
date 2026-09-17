@@ -209,8 +209,13 @@ function purchaseForm() {
       <thead><tr><th>Código</th><th>Descripción</th><th class="num">Cant. entrada</th><th>Unidad de entrada</th><th class="num">Entra al stock</th><th class="num">Costo/base</th><th class="num">Subtotal</th><th></th></tr></thead>
       <tbody id="pfBody"></tbody>
     </table>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;padding:10px;border:1px dashed #cbd5e1;border-radius:8px;flex-wrap:wrap">
-      <select id="pfProd" style="flex:1 1 260px">${db.products.map(p => `<option value="${p.id}">${p.code} — ${p.name}</option>`).join('')}</select>
+    <div style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;padding:10px;border:1px dashed #cbd5e1;border-radius:8px;flex-wrap:wrap">
+      <div style="flex:1 1 260px;position:relative">
+        <input id="pfProdSearch" type="text" placeholder="Buscar producto por nombre, código o palabra clave..." autocomplete="off"
+          style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+        <div id="pfProdResults" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d1d5db;border-radius:6px;max-height:200px;overflow-y:auto;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15)"></div>
+        <input type="hidden" id="pfProd" />
+      </div>
       <select id="pfUnit" style="flex:1 1 240px"></select>
       <input id="pfQty" type="number" step="0.001" min="0" value="1" style="width:110px" title="Cantidad de entrada" />
       <input id="pfCost" type="number" step="0.0001" min="0" value="0" style="width:120px" title="Costo por unidad base (USD)" />
@@ -408,7 +413,70 @@ function purchaseForm() {
   };
   $('#pfQty').addEventListener('input', hint);
   $('#pfCost').addEventListener('input', hint);
-  $('#pfProd').addEventListener('change', fillUnit);
+  // Búsqueda inteligente de productos
+  const pfSearchInput = $('#pfProdSearch');
+  const pfResults = $('#pfProdResults');
+  const pfProdHidden = $('#pfProd');
+  let pfSelectedProduct = null;
+
+  const searchProducts = (q) => {
+    if (!q || q.length < 1) { pfResults.style.display = 'none'; return; }
+    const ql = q.toLowerCase();
+    const matches = db.products.filter(p => {
+      canonicalizeProduct(p);
+      const nameMatch = (p.name || '').toLowerCase().includes(ql);
+      const codeMatch = (p.code || '').toLowerCase().includes(ql);
+      const catMatch = (p.category || '').toLowerCase().includes(ql);
+      const descMatch = (p.description || '').toLowerCase().includes(ql);
+      const keywords = (p.keywords || '').toLowerCase().includes(ql);
+      return nameMatch || codeMatch || catMatch || descMatch || keywords;
+    }).slice(0, 15);
+    if (matches.length === 0) {
+      pfResults.innerHTML = '<div style="padding:8px;color:#6b7280;font-size:12px">Sin resultados</div>';
+    } else {
+      pfResults.innerHTML = matches.map(p => {
+        canonicalizeProduct(p);
+        const stock = invStock(p);
+        return `<div style="padding:6px 8px;cursor:pointer;border-bottom:1px solid #f3f4f6;font-size:12px;display:flex;justify-content:space-between;align-items:center" data-pid="${p.id}" class="pf-prod-opt">
+          <span><b>${esc(p.code)}</b> — ${esc(p.name)} <span style="color:#6b7280">(${esc(p.category || '')})</span></span>
+          <span style="color:#6b7280;font-size:11px">Stock: ${stock.toFixed(1)}</span>
+        </div>`;
+      }).join('');
+    }
+    pfResults.style.display = 'block';
+  };
+
+  pfSearchInput.addEventListener('input', (e) => {
+    pfSelectedProduct = null;
+    pfProdHidden.value = '';
+    searchProducts(e.target.value.trim());
+    fillUnit();
+  });
+
+  pfSearchInput.addEventListener('focus', (e) => {
+    if (e.target.value.trim()) searchProducts(e.target.value.trim());
+  });
+
+  pfResults.addEventListener('click', (e) => {
+    const opt = e.target.closest('.pf-prod-opt');
+    if (!opt) return;
+    const pid = +opt.dataset.pid;
+    const p = db.products.find(x => x.id === pid);
+    if (!p) return;
+    pfSelectedProduct = p;
+    pfProdHidden.value = p.id;
+    pfSearchInput.value = p.code + ' — ' + p.name;
+    pfResults.style.display = 'none';
+    fillUnit();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#pfProdSearch') && !e.target.closest('#pfProdResults')) {
+      pfResults.style.display = 'none';
+    }
+  });
+
+  curProd = () => pfSelectedProduct || db.products.find(x => x.id === +pfProdHidden.value);
   $('#pfUnit').addEventListener('change', hint);
   $('#pfPay').addEventListener('change', () => {
     const m = mode();
@@ -1649,8 +1717,14 @@ function cxcForm() {
       };
       db.receivables.unshift(r);
       c.balance = (c.balance || 0) + total;
-      DB.save(db); closeModal(); renderCxC();
-      toast('Cuenta por cobrar registrada', 'success');
+      DB.save(db); renderCxC();
+      toast('Cuenta por cobrar registrada — puede crear otra o cerrar', 'success');
+      // Limpiar campos para nuevo registro
+      const freshNum = 'F-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random()*999)).padStart(3,'0');
+      $('#cxcNum').value = freshNum;
+      $('#cxcTotal').value = '0';
+      $('#cxcMotivo').value = '';
+      $('#cxcTotal').focus();
     });
   }, 60);
 }
@@ -1936,8 +2010,12 @@ function cxpForm() {
       };
       db.payables.unshift(p);
       s.balance = (s.balance || 0) + total;
-      DB.save(db); closeModal(); renderCxP();
-      toast('Cuenta por pagar registrada', 'success');
+      DB.save(db); renderCxP();
+      toast('Cuenta por pagar registrada — puede crear otra o cerrar', 'success');
+      const freshNum = 'P-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random()*999)).padStart(3,'0');
+      $('#pNum').value = freshNum;
+      $('#pTotal').value = '0';
+      $('#pTotal').focus();
     });
   }, 60);
 }
@@ -2162,10 +2240,26 @@ function clientForm(id) {
         status: c.status || 'active'
       };
       if (!id && isDemo()) { demoBlock('Version Demo: no se permiten nuevas altas de clientes. Adquiera la version completa.'); return; }
-      if (id) Object.assign(c, data);
-      else db.clients.push({ id: Date.now(), createdAt: veDate(), ...data });
-      DB.save(db); closeModal(); renderClients();
-      toast('Cliente guardado', 'success');
+      if (id) {
+        Object.assign(c, data);
+        DB.save(db); closeModal(); renderClients();
+        toast('Cliente actualizado', 'success');
+      } else {
+        db.clients.push({ id: Date.now(), createdAt: veDate(), ...data });
+        DB.save(db); renderClients();
+        toast('Cliente "' + data.name + '" guardado — puede crear otro o cerrar', 'success');
+        // Limpiar campos para nuevo registro
+        const freshCode = nextCorrelative('CLI', db.clients);
+        $('#clCode').value = freshCode;
+        $('#clTax').value = '';
+        $('#clName').value = '';
+        $('#clAddr').value = '';
+        $('#clPhone').value = '';
+        $('#clEmail').value = '';
+        $('#clLim').value = '0';
+        $('#clBal').value = '0';
+        $('#clName').focus();
+      }
     });
   }, 60);
 }
@@ -2263,10 +2357,25 @@ function supplierForm(id) {
         status: s.status || 'active'
       };
       if (!id && isDemo()) { demoBlock('Version Demo: no se permiten nuevas altas de proveedores. Adquiera la version completa.'); return; }
-      if (id) Object.assign(s, data);
-      else db.suppliers.push({ id: Date.now(), ...data });
-      DB.save(db); closeModal(); renderSuppliers();
-      toast('Proveedor guardado', 'success');
+      if (id) {
+        Object.assign(s, data);
+        DB.save(db); closeModal(); renderSuppliers();
+        toast('Proveedor actualizado', 'success');
+      } else {
+        db.suppliers.push({ id: Date.now(), ...data });
+        DB.save(db); renderSuppliers();
+        toast('Proveedor "' + data.name + '" guardado — puede crear otro o cerrar', 'success');
+        const freshCode = nextCorrelative('PROV', db.suppliers);
+        $('#spCode').value = freshCode;
+        $('#spTax').value = '';
+        $('#spName').value = '';
+        $('#spCon').value = '';
+        $('#spPh').value = '';
+        $('#spEm').value = '';
+        $('#spBal').value = '0';
+        $('#spAddr').value = '';
+        $('#spName').focus();
+      }
     });
   }, 60);
 }
@@ -2584,6 +2693,11 @@ function renderReports() {
         <p style="color:#6b7280;font-size:13px">Ranking de productos por rotación.</p>
         <button class="btn primary" style="margin-top:8px">Generar</button>
       </div>
+      <div class="card" style="cursor:pointer" onclick="reportInvAdjustments()">
+        <h3 class="card-title">${ico('refresh')} Ajustes de inventario</h3>
+        <p style="color:#6b7280;font-size:13px">Historial de ajustes con tipo, motivo y responsable.</p>
+        <button class="btn primary" style="margin-top:8px">Generar</button>
+      </div>
     </div>
   `;
   $('#dashContent').innerHTML = html;
@@ -2843,6 +2957,130 @@ function reportTopPDF() {
   });
 }
 
+function reportInvAdjustments() {
+  const movements = db.inventoryMovements || [];
+  const html = `
+    <div class="form-grid" style="margin-bottom:12px">
+      <div class="field"><label>Período</label>
+        <select id="riaPeriod">
+          <option value="">Todo</option>
+          <option value="today">Hoy</option>
+          <option value="week">Esta semana</option>
+          <option value="month">Este mes</option>
+          <option value="custom">Personalizado...</option>
+        </select>
+      </div>
+      <div class="field" id="riaCustomDates" style="display:none">
+        <label>Desde — Hasta</label>
+        <div style="display:flex;gap:4px;align-items:center">
+          <input type="date" id="riaFrom" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+          <span>—</span>
+          <input type="date" id="riaTo" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+        </div>
+      </div>
+      <div class="field"><label>Tipo</label>
+        <select id="riaType">
+          <option value="">Todos</option>
+          <option value="positive">Ajuste positivo</option>
+          <option value="negative">Ajuste negativo</option>
+          <option value="consumo">Consumo propio</option>
+          <option value="colaboracion">Colaboración</option>
+          <option value="donacion">Donación</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+    </div>
+    <div id="riaContent"></div>
+  `;
+  openModal({ title: 'Reporte de Ajustes de Inventario', body: html, size: 'modal-lg',
+    footer: `<button class="btn" onclick="closeModal()">Cerrar</button>
+             <button class="btn" onclick="reportInvAdjCSV()">Exportar CSV</button>` });
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const startOfWeek = (d) => { const r = new Date(d); r.setDate(r.getDate() - r.getDay()); r.setHours(0,0,0,0); return r; };
+  const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+
+  const filterMovements = () => {
+    const period = $('#riaPeriod')?.value || '';
+    const type = $('#riaType')?.value || '';
+    const now = new Date();
+    let from = null, to = null;
+    if (period === 'today') { from = today; to = now; }
+    else if (period === 'week') { from = startOfWeek(now); to = now; }
+    else if (period === 'month') { from = startOfMonth(now); to = now; }
+    else if (period === 'custom') {
+      const f = $('#riaFrom')?.value;
+      const t = $('#riaTo')?.value;
+      if (f && t) { from = new Date(f); to = new Date(t + 'T23:59:59'); }
+    }
+    return movements.filter(m => {
+      if (type && m.type !== type) return false;
+      if (from && to) {
+        const md = new Date(m.date);
+        if (md < from || md > to) return false;
+      }
+      return true;
+    }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  };
+
+  const render = () => {
+    const list = filterMovements();
+    const el = $('#riaContent');
+    if (!el) return;
+    if (list.length === 0) { el.innerHTML = '<div class="dt empty">Sin ajustes registrados para los filtros seleccionados</div>'; return; }
+    const totalPos = list.filter(m => m.type === 'positive').reduce((s, m) => s + m.qty, 0);
+    const totalNeg = list.filter(m => m.type === 'negative').reduce((s, m) => s + m.qty, 0);
+    const totalOut = list.filter(m => ['consumo', 'colaboracion', 'donacion'].includes(m.type)).reduce((s, m) => s + m.qty, 0);
+    el.innerHTML = `
+      <div style="display:flex;gap:10px;margin-bottom:10px">
+        <div class="kpi" style="flex:1"><div class="kpi-info"><div class="lbl">Total ajustes</div><div class="val">${list.length}</div></div></div>
+        <div class="kpi k-green" style="flex:1"><div class="kpi-info"><div class="lbl">Entradas (+)</div><div class="val">${totalPos.toFixed(2)}</div></div></div>
+        <div class="kpi k-red" style="flex:1"><div class="kpi-info"><div class="lbl">Salidas (-)</div><div class="val">${(totalNeg + totalOut).toFixed(2)}</div></div></div>
+      </div>
+      <div class="dt-wrap" style="max-height:350px;overflow:auto">
+        <table class="dt">
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="num">Cantidad</th><th class="num">Stock ant.</th><th class="num">Stock nuevo</th><th>Motivo</th><th>Usuario</th></tr></thead>
+          <tbody>${list.map(m => {
+            const typeColors = { positive: '#16a34a', negative: '#dc2626', consumo: '#d97706', colaboracion: '#2563eb', donacion: '#7c3aed', otro: '#6b7280' };
+            return `<tr>
+              <td>${m.date}</td>
+              <td><small>${m.productCode}</small> ${m.productName}</td>
+              <td><span style="color:${typeColors[m.type] || '#6b7280'};font-weight:600">${m.typeLabel}</span></td>
+              <td class="num" style="color:${['positive'].includes(m.type) ? '#16a34a' : '#dc2626'}">${['positive'].includes(m.type) ? '+' : '-'}${m.qty.toFixed(2)} ${m.unit}</td>
+              <td class="num">${m.previousStock.toFixed(2)}</td>
+              <td class="num"><b>${m.newStock.toFixed(2)}</b></td>
+              <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${m.reason || '—'}</td>
+              <td><small>${m.user || '—'}</small></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`;
+  };
+
+  setTimeout(() => {
+    $('#riaPeriod').addEventListener('change', () => {
+      const cd = $('#riaCustomDates');
+      if (cd) cd.style.display = $('#riaPeriod').value === 'custom' ? 'block' : 'none';
+      render();
+    });
+    $('#riaFrom')?.addEventListener('change', render);
+    $('#riaTo')?.addEventListener('change', render);
+    $('#riaType').addEventListener('change', render);
+    render();
+  }, 60);
+}
+
+function reportInvAdjCSV() {
+  const movements = db.inventoryMovements || [];
+  if (movements.length === 0) { toast('Sin datos para exportar', 'warn'); return; }
+  const header = 'Fecha,Producto,Codigo,Tipo,Cantidad,Unidad,Stock Anterior,Stock Nuevo,Motivo,Usuario';
+  const rows = movements.map(m => `${m.date},"${(m.productName||'').replace(/"/g,'""')}","${m.productCode||''}",${m.typeLabel},${m.qty},${m.unit},${m.previousStock},${m.newStock},"${(m.reason||'').replace(/"/g,'""')}","${(m.user||'').replace(/"/g,'""')}"`).join('\n');
+  const blob = new Blob(['\ufeff' + header + '\n' + rows], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'ajustes_inventario.csv'; a.click();
+  toast('CSV exportado', 'success');
+}
+
 function exportReport(name, csvBody, header) {
   const h = header || 'Codigo,Descripcion,Categoria,Stock,Precio,Valor';
   const csv = h + '\n' + csvBody;
@@ -2938,10 +3176,21 @@ function userForm(id) {
         role: $('#uRole').value, branch: $('#uBr').value,
         email: $('#uEmail').value, status: $('#uSt').value
       };
-      if (id) Object.assign(u, data);
-      else db.users.push({ id: Date.now(), ...data, lastLogin: '—' });
-      DB.save(db); closeModal(); renderUsers();
-      toast('Usuario guardado', 'success');
+      if (id) {
+        Object.assign(u, data);
+        DB.save(db); closeModal(); renderUsers();
+        toast('Usuario actualizado', 'success');
+      } else {
+        if (!data.username || !data.name) { toast('Ingrese usuario y nombre', 'warn'); return; }
+        db.users.push({ id: Date.now(), ...data, lastLogin: '—' });
+        DB.save(db); renderUsers();
+        toast('Usuario "' + data.name + '" guardado — puede crear otro o cerrar', 'success');
+        $('#uUser').value = '';
+        $('#uName').value = '';
+        $('#uEmail').value = '';
+        $('#uPass').value = '';
+        $('#uUser').focus();
+      }
     });
   }, 60);
 }
