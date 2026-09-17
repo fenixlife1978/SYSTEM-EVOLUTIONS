@@ -2913,30 +2913,48 @@ function renderCajas() {
       <div class="dt-toolbar"><h3>Cajas y su actividad</h3></div>
       <div class="dt-wrap">
         <table class="dt">
-          <thead><tr><th>ID Caja</th><th>Nombre</th><th>Prefijo</th><th>Próx. #</th><th class="num">Ventas</th><th class="num">Total vendido</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>ID Caja</th><th>Nombre</th><th>Usuario asignado</th><th>Prefijo</th><th>Próx. #</th><th class="num">Ventas</th><th class="num">Total vendido</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            ${resumen.map(r => `
-              <tr>
+            ${resumen.map(r => {
+              const conf = db.settings?.cajas?.[r.caja_id] || {};
+              const assigned = conf.assignedUser || '';
+              return `<tr>
                 <td><code>${r.caja_id}</code></td>
                 <td>${r.caja_nombre}</td>
-                <td>${(db.settings?.cajas?.[r.caja_id]?.prefijo || r.caja_id?.slice(-2) || '01')}</td>
-                <td>${db.settings?.cajas?.[r.caja_id]?.nextNumber || 1}</td>
+                <td>
+                  <select class="cj-assign" data-caja="${esc(r.caja_id)}" style="font-size:11px;padding:2px 4px;border:1px solid #d1d5db;border-radius:4px">
+                    <option value="">— Sin asignar —</option>
+                    ${db.users.map(u => `<option value="${u.username}" ${assigned === u.username ? 'selected' : ''}>${u.name} (${u.role})</option>`).join('')}
+                  </select>
+                </td>
+                <td>${conf.prefijo || r.caja_id?.slice(-2) || '01'}</td>
+                <td>${conf.nextNumber || 1}</td>
                 <td class="num">${r.ventas}</td>
                 <td class="num"><b>${fmt.money(r.total)}</b></td>
                 <td>${r.caja_id === getCajaId() ? '<span class="pill green">Actual</span>' : '<span class="pill blue">Otra</span>'}</td>
                 <td></td>
-              </tr>`).join('')}
-            ${resumen.length === 0 ? `
-              <tr>
+              </tr>`;
+            }).join('')}
+            ${resumen.length === 0 ? (() => {
+              const conf = db.settings?.cajas?.[getCajaId()] || {};
+              const assigned = conf.assignedUser || '';
+              return `<tr>
                 <td><code>${getCajaId()}</code></td>
                 <td>${getCajaNombre()}</td>
+                <td>
+                  <select class="cj-assign" data-caja="${esc(getCajaId())}" style="font-size:11px;padding:2px 4px;border:1px solid #d1d5db;border-radius:4px">
+                    <option value="">— Sin asignar —</option>
+                    ${db.users.map(u => `<option value="${u.username}" ${assigned === u.username ? 'selected' : ''}>${u.name} (${u.role})</option>`).join('')}
+                  </select>
+                </td>
                 <td>${getInvoicePrefix()}</td>
                 <td>${db.settings?.cajas?.[getCajaId()]?.nextNumber || 1}</td>
                 <td class="num">0</td>
                 <td class="num">$ 0.00</td>
                 <td><span class="pill green">Actual</span></td>
                 <td></td>
-              </tr>` : ''}
+              </tr>`;
+            })() : ''}
           </tbody>
         </table>
       </div>
@@ -2953,6 +2971,17 @@ function renderCajas() {
     </div>
   `;
   $('#dashContent').innerHTML = html;
+
+  // Guardar asignación de usuario
+  $$('.cj-assign', document).forEach(sel => sel.addEventListener('change', () => {
+    const cid = sel.dataset.caja;
+    if (!db.settings.cajas) db.settings.cajas = {};
+    if (!db.settings.cajas[cid]) db.settings.cajas[cid] = { nextNumber: 1 };
+    db.settings.cajas[cid].assignedUser = sel.value;
+    DB.save(db);
+    const u = db.users.find(x => x.username === sel.value);
+    toast(u ? `Caja ${cid} asignada a ${u.name}` : `Asignación removida de ${cid}`, 'success');
+  }));
 
   // Pintar configuración de numeración
   const configTb = $('#cjConfigTbody');
@@ -2995,8 +3024,8 @@ function cajaForm() {
       <div class="field"><label>Tipo</label>
         <select id="cjfType"><option value="cliente">Cliente (se conecta a servidor)</option><option value="servidor">Servidor (principal)</option></select>
       </div>
-      <div class="field"><label>Cajero asignado (opcional)</label>
-        <select id="cjfCashier"><option value="">— Ninguno —</option>${db.users.filter(u => u.role === 'cashier').map(u => `<option value="${u.username}">${u.name}</option>`).join('')}</select>
+      <div class="field"><label>Usuario asignado</label>
+        <select id="cjfUser"><option value="">— Ninguno —</option>${db.users.map(u => `<option value="${u.username}">${u.name} (${u.role})</option>`).join('')}</select>
       </div>
     </div>
   `;
@@ -3009,11 +3038,16 @@ function cajaForm() {
       if (!name) { toast('Ingrese el nombre de la caja', 'warn'); return; }
       const cid = 'CAJA-' + name.replace(/\s+/g, '-').toUpperCase().slice(0, 12) + '-' + Date.now().toString(36).slice(-4).toUpperCase();
       if (!db.settings.cajas) db.settings.cajas = {};
-      db.settings.cajas[cid] = { prefijo: $('#cjfPref').value || '02', nextNumber: 1 };
+      db.settings.cajas[cid] = {
+        prefijo: $('#cjfPref').value || '02',
+        nextNumber: 1,
+        assignedUser: $('#cjfUser').value || ''
+      };
       DB.save(db);
       closeModal();
       renderCajas();
-      toast('Caja "' + name + '" creada', 'success');
+      const u = db.users.find(x => x.username === $('#cjfUser').value);
+      toast(`Caja "${name}" creada${u ? ` — asignada a ${u.name}` : ''}`, 'success');
     });
   }, 60);
 }
